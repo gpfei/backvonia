@@ -1,0 +1,412 @@
+
+
+Talevonia – MVP Product Requirements Document (v2.0)
+
+A branching, AI-assisted storytelling app for iOS, iPadOS, and macOS
+
+⸻
+
+1. Product Overview
+
+Talevonia is a private, offline-first creative writing tool that helps users build branching narratives.
+Users write stories through interconnected nodes, explore alternate branches, and enhance their stories using AI text continuation and AI image generation.
+
+The application supports:
+	•	iOS
+	•	iPadOS
+	•	macOS (App Store)
+All using SwiftUI + a shared codebase.
+
+Cloud sync is not part of the MVP.
+
+⸻
+
+2. MVP Goals
+
+The MVP should deliver:
+	•	A fast and frictionless writing experience
+	•	A visual branching editor with vertical main path + horizontal branch switching
+	•	AI-assisted writing (3 continuation options per request)
+	•	AI-based illustration generation
+	•	Local-only data storage (per device)
+	•	Reading mode (linear path)
+	•	Shareable story paths (image card + web reader)
+	•	Optional Pro tier via IAP
+	•	Shared AI quotas across iPhone + iPad + Mac based on IAP receipt identity (no login)
+
+Non-goals for MVP:
+	•	No user accounts
+	•	No cloud sync
+	•	No community publishing
+	•	No collaboration
+	•	No versioning
+	•	No online multiplayer or shared stories
+	•	No character/worldbuilding system
+
+⸻
+
+3. Design Principles
+	1.	Zero friction — user opens app → starts writing immediately.
+	2.	Private by default — all data stored locally unless shared by the user.
+	3.	Local-first — storage, editing, browsing all offline.
+	4.	AI as a creative assistant, not as the central storyteller.
+	5.	Unified experience across devices with appropriate UI adaptation:
+	•	iPhone: simple, stacked screens
+	•	iPad: split view
+	•	macOS: sidebar + toolbar UI
+
+⸻
+
+4. Supported Platforms & UX Guidelines
+
+4.1 iOS (iPhone)
+	•	TabView navigation
+	•	NavigationStack for browsing
+	•	Sheet modals for writing/AI actions
+	•	Touch-first interactions
+	•	Optimized for compact width
+
+4.2 iPadOS
+	•	Uses NavigationSplitView:
+
+Sidebar: Story List
+Detail: Editor or Reading Mode
+
+
+	•	Larger node preview cards
+	•	Horizontal branch switching with swipe or UI buttons
+	•	Pencil support (future)
+
+4.3 macOS
+	•	NavigationSplitView with native macOS UX:
+	•	Sidebar story list
+	•	Toolbar actions (New Story, Reading Mode, Share, etc.)
+	•	Keyboard shortcuts:
+	•	⌘N new story
+	•	⌘R reading mode
+	•	⌘⇧I generate image
+	•	Drag & drop media (future extension)
+	•	Multi-window support (future)
+
+⸻
+
+5. Core Concepts
+
+5.1 Story Structure
+
+A story is composed of nodes that form a tree.
+	•	Vertical path = from root to the currently selected node
+	•	Horizontal branches = sibling nodes under the same parent
+	•	Each node contains:
+	•	Summary (1-line)
+	•	Full text
+	•	Multiple media items
+	•	Tags (auto-generated)
+
+5.2 Media Model
+
+Media supports:
+	•	Images
+	•	Videos (future expansion)
+	•	Live Photos
+	•	Multi-file assets (e.g., still + motion for Live Photo)
+
+Each node can have multiple media items.
+Story-level media may exist for cover images.
+
+⸻
+
+6. User Flows
+
+6.1 Story List → New Story → Editor
+
+StoryListView
+   → NewStoryView
+       → StoryEditorView
+           → ReadingModeView
+
+6.2 Within the Editor
+	•	Scroll vertically to see the mainline
+	•	Swipe horizontally to switch branches
+	•	Tap a node to preview full content
+	•	Add children using:
+	•	Manual writing
+	•	AI text continuation
+	•	AI-generated illustration
+	•	Open reading mode anytime from the toolbar/header
+
+6.3 Sharing
+	•	Export a linear reading path
+	•	Two share formats:
+	1.	Image card (social sharing)
+	2.	Web reader link (read-only)
+
+⸻
+
+7. Feature Specifications
+
+⸻
+
+7.1 Stories List
+
+Displays:
+	•	Story cover (if available)
+	•	Title
+	•	Node count
+	•	Last updated time
+
+Actions:
+	•	Create new story
+	•	Delete story
+	•	Rename story
+
+Platform adaptation:
+	•	iPhone: simple list
+	•	iPad/Mac: sidebar in split view
+
+⸻
+
+7.2 New Story Creation
+
+Inputs:
+	•	Title
+	•	Opening paragraph
+	•	Optional: AI-generate opening text
+	•	Optional: AI-generate cover (story-level media)
+
+On creation:
+	•	Root node is generated
+	•	User enters the Story Editor
+
+⸻
+
+7.3 Story Editor (Core Screen)
+
+Layout
+	•	Vertical mainline: root → selected node
+	•	Horizontal branch switching: sibling nodes
+	•	Node Card:
+	•	Summary
+	•	Preview text
+	•	Tags
+	•	Primary media thumbnail
+
+Actions
+	•	Write next node
+	•	AI continue (3 choices)
+	•	AI image generation
+	•	Open full node details
+	•	Delete media
+	•	Reorder sibling branches
+	•	Open reading mode
+	•	Open share menu
+
+⸻
+
+7.4 Node Editing
+
+Every node supports:
+	•	Full text editing
+	•	Summary editing
+	•	Media attachments
+	•	Media actions:
+	•	Delete
+	•	Regenerate (if AI origin)
+	•	Set as primary
+
+⸻
+
+7.5 Reading Mode
+
+Linear reading experience from root to selected node.
+
+Components:
+	•	Cover
+	•	Title
+	•	Full text of path
+	•	Media inline
+	•	Scroll-based layout
+	•	Share button
+
+Platform differences:
+	•	iPhone: fullscreen modal
+	•	iPad/Mac: appears in detail panel
+
+⸻
+
+7.6 AI Text Continuation
+
+Triggered in editor.
+
+Server returns:
+	•	3 candidate paragraphs
+	•	~80–200 words
+	•	Safety-filtered
+	•	Distinct directions
+
+User selects one → becomes new child node.
+
+⸻
+
+7.7 AI Image Generation
+
+Inputs:
+	•	Node text
+	•	Optional image style
+	•	Aspect ratio
+
+Outputs:
+	•	A single generated illustration
+	•	Stored as media (node_media + media_assets)
+
+Pro mode unlocks:
+	•	More regeneration
+	•	Higher resolution
+	•	Better styles
+
+⸻
+
+7.8 Sharing
+
+Two formats:
+
+1. Share Card (Image)
+	•	Story title
+	•	Cover
+	•	Path summary
+	•	Talevonia branding
+	•	Rendered locally in SwiftUI and exported as PNG
+
+2. Web Reader (Server)
+	•	Client sends snapshot of:
+	•	Title
+	•	Path nodes
+	•	Media URLs (or embedded base64)
+	•	Server returns a share_url
+	•	Public read-only view
+
+⸻
+
+8. Data Storage (Local-Only MVP)
+
+All data stored locally per device:
+	•	Stories
+	•	Nodes
+	•	Media files
+	•	AI usage counters
+	•	User preferences
+
+Formats:
+	•	SQLite or CoreData
+	•	Media stored as files in app sandbox
+
+macOS / iPadOS use the same schema & file structure as iOS.
+
+⸻
+
+9. Pro Tier (IAP)
+
+9.1 Features
+	•	Higher AI text quota
+	•	More AI image quota
+	•	HD images
+	•	No watermark
+	•	Faster generation (server-tier optional)
+
+9.2 Universal Purchase
+	•	Same purchase unlocks iPhone + iPad + Mac
+	•	macOS app uses StoreKit identical to iOS/iPadOS
+
+9.3 Identity (no login)
+
+Identity is derived from:
+
+purchase_identity = original_transaction_id
+
+This ensures:
+	•	Shared quota across devices
+	•	No account system
+	•	Strong anti-abuse controls
+	•	True privacy (no email, no login)
+
+⸻
+
+10. AI Quota Model
+
+Per purchase_identity per day:
+	•	Text quota
+	•	Image quota
+	•	Cooldown limits per device
+	•	Abuse detection
+	•	Safety filtering
+
+Free users have small limit (e.g., 3 text, 1 image).
+Pro users have large limit (e.g., 1000 text, 50 image).
+
+⸻
+
+11. Backend Responsibilities
+
+Backend provides:
+	•	AI text continuation
+	•	AI image generation
+	•	IAP validation
+	•	Quota management
+	•	Safety filtering
+	•	Share-path hosting
+	•	Basic rate-limiting
+	•	CDNs for image hosting (optional)
+
+Backend does not store full stories or user accounts.
+
+⸻
+
+12. Platform Integration Requirements
+
+iOS
+	•	Full-screen editor
+	•	Panels for node details
+	•	Swipe navigation
+
+iPadOS
+	•	Split view
+	•	Larger cards
+	•	Multi-pane reading mode
+
+macOS
+	•	Sidebar navigation
+	•	Toolbar actions
+	•	Keyboard shortcuts
+	•	(Future) Drag & drop media
+	•	(Future) Multi-window (multiple stories open)
+
+⸻
+
+13. Non-MVP Future Ideas
+
+Not included in MVP, but planned:
+	•	Cloud sync
+	•	Collaborative writing
+	•	AI storyboard / character management
+	•	Timeline / map of branches
+	•	GPT-like “world consistency model”
+	•	Export to ePub / PDF
+	•	Public story marketplace
+	•	In-app story discovery
+	•	Voice-over reading mode
+	•	iCloud backup / multi-device sync
+	•	Undo/redo history
+
+⸻
+
+14. Summary
+
+Talevonia MVP focuses on:
+	•	Offline-first personal storytelling
+	•	AI-assisted writing & art
+	•	Branching structure with clean UI
+	•	Local storage
+	•	Cross-device quota (iOS + iPadOS + macOS)
+	•	Zero friction, privacy-first experience
+
+This document captures the complete design and scope for the cross-platform MVP.

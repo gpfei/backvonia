@@ -1,0 +1,177 @@
+
+Talevonia Data Model – Story / Node / Media (ER Design)
+
+Overview
+
+Core entities:
+	•	stories – a story project
+	•	story_nodes – narrative nodes (text + branching structure)
+	•	node_media – logical media items attached to a story or node
+	•	media_assets – physical media files (image / video / Live Photo parts, etc.)
+
+Media is modeled in two levels:
+	•	node_media = logical media (e.g., “a Live Photo”, “a main illustration”, “a teaser video”)
+	•	media_assets = actual files (e.g., still image + motion video for a Live Photo)
+
+This lets you support images, videos, Live Photos, multiple resolutions, future types without schema changes.
+
+⸻
+
+1. stories
+
+Top-level story entity.
+
+Column	Type	Description
+id	UUID PK	Unique story ID
+title	TEXT	Story title (optional)
+cover_media_id	UUID FK → node_media.id	Story cover media (image/video/Live Photo)
+description	TEXT	Optional description / blurb
+created_at	TIMESTAMPTZ	Creation time
+updated_at	TIMESTAMPTZ	Last update time
+
+Note:
+cover_media_id points directly to a node_media record, so the cover does not have to be tied to a specific node. It can be a dedicated story-level media.
+
+⸻
+
+2. story_nodes
+
+Narrative nodes (cards) that form the branching structure.
+
+Column	Type	Description
+id	UUID PK	Unique node ID
+story_id	UUID FK → stories.id	Story this node belongs to
+parent_node_id	UUID FK → story_nodes.id (nullable)	Parent node; NULL = root node
+sibling_order	INT	Order among siblings (used for horizontal branch ordering)
+depth	INT	Depth in tree (0 for root, increases downwards)
+summary	TEXT	One-line summary (card title)
+content	TEXT	Full text content of the node
+tags	TEXT[] / JSON	Auto-generated tags (e.g., ["fantasy", "forest"])
+created_at	TIMESTAMPTZ	Creation time
+updated_at	TIMESTAMPTZ	Last update time
+
+Structure rules:
+	•	A story has many nodes.
+	•	Nodes form a tree via parent_node_id:
+	•	Multiple children → multiple branches.
+	•	Siblings are different branches at the same depth.
+	•	Horizontal branch switching in the UI = switching between siblings with the same parent_node_id.
+
+⸻
+
+3. node_media
+
+Logical media items attached to a story or a node.
+	•	Can be story-level (e.g., cover art, teaser video).
+	•	Or node-level (e.g., illustrations, Live Photos for a specific node).
+
+Column	Type	Description
+id	UUID PK	Unique media ID
+story_id	UUID FK → stories.id	Story this media belongs to
+node_id	UUID FK → story_nodes.id (nullable)	Node this media is attached to; NULL = story-level media
+media_type	TEXT	Logical media type: e.g. 'image', 'video', 'live_photo', 'audio', 'album', …
+source	TEXT	'user', 'ai', 'import', etc.
+caption	TEXT	Optional caption / description (e.g., image caption)
+order_index	INT	Display order inside the node / story
+is_primary	BOOL	Whether this media is “primary” for that node (used as thumbnail)
+created_at	TIMESTAMPTZ	Creation time
+updated_at	TIMESTAMPTZ	Last update time
+
+Notes:
+	•	node_id = NULL → story-level media, e.g. story cover, teaser.
+	•	A node can have many node_media records (gallery / multiple media per node).
+	•	Live Photo is represented as one node_media with media_type = 'live_photo' and multiple media_assets.
+
+⸻
+
+4. media_assets
+
+Physical resource files (each row = one file).
+	•	For image: one asset for original, optionally one for thumbnail.
+	•	For video: multiple assets for different resolutions + thumbnail.
+	•	For Live Photo: one still_image + one motion_video asset.
+
+Column	Type	Description
+id	UUID PK	Unique asset ID
+media_id	UUID FK → node_media.id	Parent logical media
+asset_type	TEXT	'original', 'still_image', 'motion_video', 'thumbnail', 'lowres', 'hires', 'subtitle', …
+mime_type	TEXT	MIME type, e.g. image/jpeg, image/heic, video/quicktime, video/mp4
+local_path	TEXT	Relative path in local sandbox, e.g. media/story/<story_id>/<node_id>/xxx
+remote_url	TEXT	Optional URL (for future cloud sync / CDN), NULL in offline MVP
+width	INT	Width in pixels (images/video frames)
+height	INT	Height in pixels
+duration_ms	INT	Duration in ms for video/audio/Live Photo motion part
+size_bytes	BIGINT	File size in bytes
+extra_meta	JSONB	Extra metadata (EXIF, platform-specific IDs, etc.)
+created_at	TIMESTAMPTZ	Creation time
+updated_at	TIMESTAMPTZ	Last update time
+
+Live Photo example:
+	•	node_media:
+	•	media_type = 'live_photo'
+	•	media_assets:
+	•	Asset 1: asset_type = 'still_image', mime_type = 'image/heic', local_path = ...
+	•	Asset 2: asset_type = 'motion_video', mime_type = 'video/quicktime', local_path = ...
+
+⸻
+
+5. ER Diagram (Mermaid)
+
+erDiagram
+
+    STORIES {
+        UUID id PK
+        TEXT title
+        UUID cover_media_id FK
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    STORY_NODES {
+        UUID id PK
+        UUID story_id FK
+        UUID parent_node_id FK
+        INT sibling_order
+        INT depth
+        TEXT summary
+        TEXT content
+        TEXT[] tags
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    NODE_MEDIA {
+        UUID id PK
+        UUID story_id FK
+        UUID node_id FK        // nullable (story-level media when NULL)
+        TEXT media_type        // 'image' | 'video' | 'live_photo' | ...
+        TEXT source            // 'user' | 'ai' | ...
+        TEXT caption
+        INT order_index
+        BOOL is_primary
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    MEDIA_ASSETS {
+        UUID id PK
+        UUID media_id FK
+        TEXT asset_type        // 'original' | 'still_image' | 'motion_video' | 'thumbnail' | ...
+        TEXT mime_type
+        TEXT local_path
+        TEXT remote_url
+        INT  width
+        INT  height
+        INT  duration_ms
+        BIGINT size_bytes
+        JSONB extra_meta
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+    }
+
+    STORIES ||--o{ STORY_NODES : "has many nodes"
+    STORIES ||--o{ NODE_MEDIA  : "has many media"
+    STORY_NODES ||--o{ STORY_NODES : "children (parent)"
+    STORY_NODES ||--o{ NODE_MEDIA  : "has many media (node-level)"
+    NODE_MEDIA  ||--o{ MEDIA_ASSETS : "has many assets"
+

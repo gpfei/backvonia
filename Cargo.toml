@@ -1,0 +1,9 @@
+[package]
+name = "backvonia"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = { version = "0.8.7", features = ["http2", "ws"] }
+sea-orm = { version = "1.1.19", features = ["sqlx-postgres", "runtime-tokio-native-tls", "macros"] }
+time = { version = "0.3.44", features = ["serde", "macros", "serde-well-known"] }

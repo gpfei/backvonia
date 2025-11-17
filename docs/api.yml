@@ -1,0 +1,696 @@
+openapi: 3.0.3
+info:
+  title: Talevonia API
+  version: "1.0.0"
+  description: |
+    Backend API for Talevonia MVP – a branching, AI-assisted personal storytelling app.
+    Identity and quota are derived from IAP receipts (no user accounts).
+
+servers:
+  - url: https://api.talevonia.app/api/v1
+    description: Production
+
+tags:
+  - name: AI
+    description: AI text and image generation
+  - name: IAP
+    description: In-app purchase verification and quota
+  - name: Share
+    description: Story path sharing
+  - name: Media
+    description: Media upload (optional)
+
+paths:
+  /ai/text/continue:
+    post:
+      tags: [AI]
+      summary: Generate AI text continuation candidates
+      operationId: aiTextContinue
+      parameters:
+        - $ref: '#/components/parameters/XClientVersion'
+        - $ref: '#/components/parameters/XPlatform'
+        - $ref: '#/components/parameters/XDeviceId'
+        - $ref: '#/components/parameters/XIAPPlatform'
+        - $ref: '#/components/parameters/XIAPReceipt'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AITextContinueRequest'
+      responses:
+        '200':
+          description: AI continuation candidates
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AITextContinueResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limited or quota exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /ai/image/generate:
+    post:
+      tags: [AI]
+      summary: Generate AI image for a story node
+      operationId: aiImageGenerate
+      parameters:
+        - $ref: '#/components/parameters/XClientVersion'
+        - $ref: '#/components/parameters/XPlatform'
+        - $ref: '#/components/parameters/XDeviceId'
+        - $ref: '#/components/parameters/XIAPPlatform'
+        - $ref: '#/components/parameters/XIAPReceipt'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AIImageGenerateRequest'
+      responses:
+        '200':
+          description: AI generated image metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIImageGenerateResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limited or quota exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /iap/verify:
+    post:
+      tags: [IAP]
+      summary: Verify IAP receipt and return purchase tier
+      operationId: iapVerify
+      parameters:
+        - $ref: '#/components/parameters/XClientVersion'
+        - $ref: '#/components/parameters/XPlatform'
+        - $ref: '#/components/parameters/XDeviceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IAPVerifyRequest'
+      responses:
+        '200':
+          description: IAP verification result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IAPVerifyResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Invalid or expired receipt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /quota:
+    get:
+      tags: [IAP]
+      summary: Get current AI quotas
+      operationId: getQuota
+      parameters:
+        - $ref: '#/components/parameters/XClientVersion'
+        - $ref: '#/components/parameters/XPlatform'
+        - $ref: '#/components/parameters/XDeviceId'
+        - $ref: '#/components/parameters/XIAPPlatform'
+        - $ref: '#/components/parameters/XIAPReceipt'
+      responses:
+        '200':
+          description: Quota status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /share/story-path:
+    post:
+      tags: [Share]
+      summary: Create a shareable story path
+      operationId: createShareStoryPath
+      parameters:
+        - $ref: '#/components/parameters/XClientVersion'
+        - $ref: '#/components/parameters/XPlatform'
+        - $ref: '#/components/parameters/XDeviceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShareStoryPathRequest'
+      responses:
+        '200':
+          description: Share link created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareStoryPathResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /share/story-path/{share_id}:
+    get:
+      tags: [Share]
+      summary: Get shared story path details
+      operationId: getSharedStoryPath
+      parameters:
+        - name: share_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Share identifier
+      responses:
+        '200':
+          description: Shared story path
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharedStoryPathResponse'
+        '404':
+          description: Not found or expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /media/upload:
+    post:
+      tags: [Media]
+      summary: Upload a media file (optional)
+      operationId: mediaUpload
+      parameters:
+        - $ref: '#/components/parameters/XClientVersion'
+        - $ref: '#/components/parameters/XPlatform'
+        - $ref: '#/components/parameters/XDeviceId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                mime_type:
+                  type: string
+                purpose:
+                  type: string
+                  description: e.g. "share_card", "story_media"
+      responses:
+        '200':
+          description: Media uploaded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaUploadResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  parameters:
+    XClientVersion:
+      name: X-Client-Version
+      in: header
+      required: false
+      schema:
+        type: string
+      description: Client app version (e.g. "ios-1.0.0")
+    XPlatform:
+      name: X-Platform
+      in: header
+      required: false
+      schema:
+        type: string
+        enum: [ios, ipados, macos, android, web]
+    XDeviceId:
+      name: X-Device-Id
+      in: header
+      required: false
+      schema:
+        type: string
+      description: Anonymous, client-generated device ID (UUID)
+    XIAPPlatform:
+      name: X-IAP-Platform
+      in: header
+      required: false
+      schema:
+        type: string
+        enum: [apple, google]
+    XIAPReceipt:
+      name: X-IAP-Receipt
+      in: header
+      required: false
+      schema:
+        type: string
+      description: Base64-encoded IAP receipt
+
+  schemas:
+    # Generic wrapper
+    SuccessWrapper:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          $ref: '#/components/schemas/ErrorObject'
+    ErrorObject:
+      type: object
+      properties:
+        code:
+          type: string
+          example: QUOTA_EXCEEDED
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+
+    # Quota
+    Quota:
+      type: object
+      properties:
+        text_limit_daily:
+          type: integer
+        text_used_today:
+          type: integer
+        text_remaining_today:
+          type: integer
+        image_limit_daily:
+          type: integer
+        image_used_today:
+          type: integer
+        image_remaining_today:
+          type: integer
+
+    # AI Text Continue
+    AITextContinueRequest:
+      type: object
+      properties:
+        story_context:
+          type: object
+          properties:
+            title:
+              type: string
+            tags:
+              type: array
+              items:
+                type: string
+            language:
+              type: string
+              example: en
+        path_nodes:
+          type: array
+          items:
+            type: object
+            properties:
+              summary:
+                type: string
+              content:
+                type: string
+        generation_params:
+          type: object
+          properties:
+            num_candidates:
+              type: integer
+              default: 3
+            min_words:
+              type: integer
+              default: 80
+            max_words:
+              type: integer
+              default: 200
+            tone:
+              type: string
+              description: e.g. "neutral", "dark"
+            avoid_hard_end:
+              type: boolean
+              default: true
+      required: [story_context, path_nodes]
+
+    AITextCandidate:
+      type: object
+      properties:
+        id:
+          type: string
+        content:
+          type: string
+        safety_flags:
+          type: array
+          items:
+            type: string
+
+    AITextContinueResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            purchase_tier:
+              type: string
+              enum: [free, pro]
+            quota:
+              $ref: '#/components/schemas/QuotaSubset'
+            candidates:
+              type: array
+              items:
+                $ref: '#/components/schemas/AITextCandidate'
+
+    QuotaSubset:
+      type: object
+      properties:
+        text_remaining_today:
+          type: integer
+        image_remaining_today:
+          type: integer
+
+    # AI Image Generate
+    AIImageGenerateRequest:
+      type: object
+      properties:
+        story_context:
+          type: object
+          properties:
+            title:
+              type: string
+            language:
+              type: string
+        node:
+          type: object
+          properties:
+            summary:
+              type: string
+            content:
+              type: string
+            tags:
+              type: array
+              items:
+                type: string
+        image_params:
+          type: object
+          properties:
+            style:
+              type: string
+              description: e.g. "storybook", "anime", "realistic"
+            aspect_ratio:
+              type: string
+              description: e.g. "3:4", "16:9"
+            resolution:
+              type: string
+              description: e.g. "low", "medium", "high"
+      required: [story_context, node]
+
+    GeneratedImage:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+        mime_type:
+          type: string
+          example: image/png
+        width:
+          type: integer
+        height:
+          type: integer
+
+    AIImageGenerateResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            purchase_tier:
+              type: string
+              enum: [free, pro]
+            quota:
+              $ref: '#/components/schemas/QuotaSubset'
+            image:
+              $ref: '#/components/schemas/GeneratedImage'
+
+    # IAP Verify
+    IAPVerifyRequest:
+      type: object
+      properties:
+        platform:
+          type: string
+          enum: [apple, google]
+        receipt:
+          type: string
+          description: Base64-encoded receipt
+        app_version:
+          type: string
+        device_id:
+          type: string
+      required: [platform, receipt]
+
+    IAPVerifyResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            purchase_tier:
+              type: string
+              enum: [free, pro]
+            purchase_identity:
+              type: string
+              description: original_transaction_id or equivalent
+            product_id:
+              type: string
+            valid_until:
+              type: string
+              format: date-time
+              nullable: true
+            platform:
+              type: string
+              enum: [apple, google]
+
+    # Quota Response
+    QuotaResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            purchase_tier:
+              type: string
+              enum: [free, pro]
+            quota:
+              $ref: '#/components/schemas/Quota'
+
+    # Share Story Path
+    StoryNodeMediaRef:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+        mime_type:
+          type: string
+
+    ShareStoryNode:
+      type: object
+      properties:
+        summary:
+          type: string
+        content:
+          type: string
+        media:
+          type: array
+          items:
+            $ref: '#/components/schemas/StoryNodeMediaRef'
+
+    ShareStoryPathRequest:
+      type: object
+      properties:
+        story:
+          type: object
+          properties:
+            title:
+              type: string
+            language:
+              type: string
+        path:
+          type: object
+          properties:
+            nodes:
+              type: array
+              items:
+                $ref: '#/components/schemas/ShareStoryNode'
+        share_options:
+          type: object
+          properties:
+            expires_in_days:
+              type: integer
+      required: [story, path]
+
+    ShareStoryPathResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            share_id:
+              type: string
+            share_url:
+              type: string
+              format: uri
+            expires_at:
+              type: string
+              format: date-time
+              nullable: true
+
+    SharedStoryPathResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            story:
+              type: object
+              properties:
+                title:
+                  type: string
+                language:
+                  type: string
+            path:
+              type: object
+              properties:
+                nodes:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/ShareStoryNode'
+            created_at:
+              type: string
+              format: date-time
+            expires_at:
+              type: string
+              format: date-time
+              nullable: true
+
+    # Media Upload
+    MediaUploadResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            url:
+              type: string
+              format: uri
+            mime_type:
+              type: string
