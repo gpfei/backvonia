@@ -18,4 +18,5 @@ features = [
   # View the list of supported features at https://www.sea-ql.org/SeaORM/docs/install-and-config/database-and-async-runtime.
   "runtime-tokio-native-tls",  # `ASYNC_RUNTIME` feature (matches workspace config)
   "sqlx-postgres",              # `DATABASE_DRIVER` feature
+  "with-time",
 ]

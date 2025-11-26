@@ -6,8 +6,7 @@ use crate::{
         iap::IAPVerification,
     },
 };
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use tracing::{info, instrument, warn};
 
@@ -128,9 +127,7 @@ impl IAPService {
         // Parse expiration for subscriptions
         let valid_until = expires_date_ms
             .and_then(|ms| ms.parse::<i64>().ok())
-            .and_then(|ts_ms| {
-                DateTime::from_timestamp(ts_ms / 1000, (ts_ms % 1000) as u32 * 1_000_000)
-            });
+            .and_then(|ts_ms| time::OffsetDateTime::from_unix_timestamp(ts_ms / 1000).ok());
 
         info!(
             "Successfully verified Apple IAP receipt: tier={:?}, product_id={:?}",

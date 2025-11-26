@@ -3,7 +3,7 @@ members = [".", "migration", "entity"]
 resolver = "2"
 
 [workspace.dependencies]
-sea-orm = { version = "1.1", features = ["sqlx-postgres", "runtime-tokio-native-tls", "macros"] }
+sea-orm = { version = "1.1", features = ["sqlx-postgres", "runtime-tokio-native-tls", "macros", "with-time", "with-uuid"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 
@@ -22,7 +22,7 @@ tower-http = { version = "0.6", features = ["cors", "trace", "request-id", "time
 tokio = { workspace = true }
 
 # Database
-sea-orm = { workspace = true, features = ["sqlx-postgres", "runtime-tokio-native-tls", "macros", "with-time"] }
+sea-orm = { workspace = true }
 entity = { path = "entity" }
 migration = { path = "migration" }
 
@@ -47,7 +47,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Utilities
 uuid = { version = "1", features = ["v4", "serde"] }
-chrono = { version = "0.4", features = ["serde"] }
+time = { version = "0.3", features = ["serde", "macros", "parsing", "formatting"] }
 base64 = "0.22"
 
 # Redis (for rate limiting)

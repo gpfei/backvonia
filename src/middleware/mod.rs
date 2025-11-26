@@ -6,6 +6,4 @@ pub mod rate_limit;
 pub use auth::{iap_auth_middleware, IAPIdentity};
 
 // Export rate limit middleware components
-pub use rate_limit::{
-    create_rate_limiter, create_rate_limiter_with_config, rate_limit_middleware, RateLimitConfig,
-};
+pub use rate_limit::create_rate_limiter;

@@ -3,7 +3,6 @@ use crate::{
     error::{ApiError, Result},
     models::common::{PurchaseTier, Quota, QuotaSubset},
 };
-use chrono::{Local, NaiveDate};
 use sea_orm::{
     entity::*, query::*, sea_query::OnConflict, DatabaseConnection, DatabaseTransaction,
     TransactionTrait,
@@ -49,7 +48,7 @@ impl QuotaService {
     /// Check current quota status for a purchase identity
     #[instrument(skip(self))]
     pub async fn check_quota(&self, identity: &str, tier: PurchaseTier) -> Result<QuotaStatus> {
-        let today = Local::now().naive_local().date();
+        let today = time::OffsetDateTime::now_utc().date();
         let (text_limit, image_limit) = self.get_limits(tier);
 
         // Get or create usage record for today
@@ -70,7 +69,7 @@ impl QuotaService {
         identity: &str,
         tier: PurchaseTier,
     ) -> Result<QuotaStatus> {
-        let today = Local::now().naive_local().date();
+        let today = time::OffsetDateTime::now_utc().date();
         let (text_limit, image_limit) = self.get_limits(tier);
 
         let txn = self.db.begin().await?;
@@ -91,7 +90,7 @@ impl QuotaService {
         let mut usage_active: entity::quota_usage::ActiveModel = usage.into();
         let current = usage_active.text_count.as_ref().to_owned();
         usage_active.text_count = Set(current + 1);
-        usage_active.updated_at = Set(chrono::Utc::now().into());
+        usage_active.updated_at = Set(time::OffsetDateTime::now_utc());
         let updated = usage_active.update(&txn).await?;
 
         txn.commit().await?;
@@ -116,7 +115,7 @@ impl QuotaService {
         identity: &str,
         tier: PurchaseTier,
     ) -> Result<QuotaStatus> {
-        let today = Local::now().naive_local().date();
+        let today = time::OffsetDateTime::now_utc().date();
         let (text_limit, image_limit) = self.get_limits(tier);
 
         let txn = self.db.begin().await?;
@@ -137,7 +136,7 @@ impl QuotaService {
         let mut usage_active: entity::quota_usage::ActiveModel = usage.into();
         let current = usage_active.image_count.as_ref().to_owned();
         usage_active.image_count = Set(current + 1);
-        usage_active.updated_at = Set(chrono::Utc::now().into());
+        usage_active.updated_at = Set(time::OffsetDateTime::now_utc());
         let updated = usage_active.update(&txn).await?;
 
         txn.commit().await?;
@@ -200,8 +199,10 @@ impl QuotaService {
     async fn get_or_create_usage(
         &self,
         identity: &str,
-        date: NaiveDate,
+        date: time::Date,
     ) -> Result<entity::quota_usage::Model> {
+        let now = time::OffsetDateTime::now_utc();
+
         // Try to insert a row; if it already exists, do nothing.
         let new_usage = entity::quota_usage::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -209,8 +210,8 @@ impl QuotaService {
             usage_date: Set(date),
             text_count: Set(0),
             image_count: Set(0),
-            created_at: Set(chrono::Utc::now().into()),
-            updated_at: Set(chrono::Utc::now().into()),
+            created_at: Set(now),
+            updated_at: Set(now),
         };
 
         // Using ON CONFLICT DO NOTHING avoids unique violations under concurrency.
@@ -243,7 +244,7 @@ impl QuotaService {
     async fn find_and_lock_usage(
         &self,
         identity: &str,
-        date: NaiveDate,
+        date: time::Date,
         txn: &DatabaseTransaction,
     ) -> Result<entity::quota_usage::Model> {
         // Try to find with lock
@@ -259,14 +260,16 @@ impl QuotaService {
         }
 
         // If not found, insert (no-op if another transaction races) then re-lock.
+        let now = time::OffsetDateTime::now_utc();
+
         let new_usage = entity::quota_usage::ActiveModel {
             id: Set(Uuid::new_v4()),
             purchase_identity: Set(identity.to_string()),
             usage_date: Set(date),
             text_count: Set(0),
             image_count: Set(0),
-            created_at: Set(chrono::Utc::now().into()),
-            updated_at: Set(chrono::Utc::now().into()),
+            created_at: Set(now),
+            updated_at: Set(now),
         };
 
         entity::quota_usage::Entity::insert(new_usage)

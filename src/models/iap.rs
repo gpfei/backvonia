@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
@@ -31,7 +30,7 @@ pub struct IAPVerifyData {
     pub purchase_tier: PurchaseTier,
     pub purchase_identity: String,
     pub product_id: Option<String>,
-    pub valid_until: Option<DateTime<Utc>>,
+    pub valid_until: Option<time::OffsetDateTime>,
     pub platform: IAPPlatform,
 }
 
@@ -56,6 +55,6 @@ pub struct IAPVerification {
     pub purchase_identity: String,
     pub purchase_tier: PurchaseTier,
     pub product_id: Option<String>,
-    pub valid_until: Option<DateTime<Utc>>,
+    pub valid_until: Option<time::OffsetDateTime>,
     pub platform: IAPPlatform,
 }
