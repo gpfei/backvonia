@@ -1,1 +1,33 @@
+# Rust
 /target
+Cargo.lock
+
+# Environment files
+.env
+.env.local
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Service account keys
+*.json
+!package.json
+
+# Test coverage
+*.profraw
+tarpaulin-report.html
+
+# Database
+*.db
+*.sqlite

@@ -1,9 +1,63 @@
+[workspace]
+members = [".", "migration", "entity"]
+resolver = "2"
+
+[workspace.dependencies]
+sea-orm = { version = "1.1", features = ["sqlx-postgres", "runtime-tokio-native-tls", "macros"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+
 [package]
 name = "backvonia"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
-axum = { version = "0.8.7", features = ["http2", "ws"] }
-sea-orm = { version = "1.1.19", features = ["sqlx-postgres", "runtime-tokio-native-tls", "macros"] }
-time = { version = "0.3.44", features = ["serde", "macros", "serde-well-known"] }
+# Web framework
+axum = { version = "0.8", features = ["http2", "macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace", "request-id", "timeout"] }
+
+# Async runtime
+tokio = { workspace = true }
+
+# Database
+sea-orm = { workspace = true, features = ["sqlx-postgres", "runtime-tokio-native-tls", "macros", "with-time"] }
+entity = { path = "entity" }
+migration = { path = "migration" }
+
+# Serialization
+serde = { workspace = true }
+serde_json = "1"
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Configuration
+dotenvy = "0.15"
+config = "0.14"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Utilities
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+base64 = "0.22"
+
+# Redis (for rate limiting)
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+
+# Validation
+validator = { version = "0.18", features = ["derive"] }
+
+# Crypto
+sha2 = "0.10"
+
+[dev-dependencies]
+futures = "0.3"
