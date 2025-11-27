@@ -207,7 +207,11 @@ impl QuotaService {
             if is_image_op { "image" } else { "text" },
             identity,
             cost,
-            if is_image_op { updated.image_count } else { updated.text_count },
+            if is_image_op {
+                updated.image_count
+            } else {
+                updated.text_count
+            },
             limit
         );
 

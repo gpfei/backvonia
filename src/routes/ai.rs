@@ -8,9 +8,8 @@ use crate::{
     models::{
         ai::{
             AIImageGenerateData, AIImageGenerateRequest, AIImageGenerateResponse,
-            AITextContinueData, AITextContinueMode, AITextContinueRequest,
-            AITextContinueResponse, AITextEditData, AITextEditMode, AITextEditRequest,
-            AITextEditResponse,
+            AITextContinueData, AITextContinueMode, AITextContinueRequest, AITextContinueResponse,
+            AITextEditData, AITextEditMode, AITextEditRequest, AITextEditResponse,
         },
         common::AIOperation,
     },

@@ -3,8 +3,8 @@ use crate::{
     error::{ApiError, Result},
     models::ai::{
         AITextContinueMode, AITextEditMode, EditInput, EditParams, GeneratedImage,
-        GenerationParams, ImageParams, ImageStoryContext, NodeContext, PathNode,
-        StoryContext, StoryContextSimple, TextCandidate, TextEditCandidate,
+        GenerationParams, ImageParams, ImageStoryContext, NodeContext, PathNode, StoryContext,
+        StoryContextSimple, TextCandidate, TextEditCandidate,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -173,7 +173,10 @@ impl AIService {
             })
             .collect();
 
-        info!("Generated {} text continuations in mode {:?}", params.num_candidates, mode);
+        info!(
+            "Generated {} text continuations in mode {:?}",
+            params.num_candidates, mode
+        );
 
         Ok(candidates)
     }
@@ -341,7 +344,9 @@ impl AIService {
             prompt.push_str(&format!("{}. {}\n", i + 1, node.content));
         }
 
-        prompt.push_str("\n\nFor each continuation idea, format as:\nTitle: [brief title]\n[description]\n\n");
+        prompt.push_str(
+            "\n\nFor each continuation idea, format as:\nTitle: [brief title]\n[description]\n\n",
+        );
 
         prompt
     }
@@ -429,7 +434,10 @@ impl AIService {
             })
             .collect();
 
-        info!("Generated {} edit candidates in mode {:?}", params.num_candidates, mode);
+        info!(
+            "Generated {} edit candidates in mode {:?}",
+            params.num_candidates, mode
+        );
 
         Ok(candidates)
     }

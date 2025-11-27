@@ -7,8 +7,8 @@ use super::common::{PurchaseTier, QuotaSubset};
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum AITextContinueMode {
-    Prose,  // Generate full prose continuation (default)
-    Ideas,  // Generate high-level continuation ideas or branch directions
+    Prose, // Generate full prose continuation (default)
+    Ideas, // Generate high-level continuation ideas or branch directions
 }
 
 impl Default for AITextContinueMode {
@@ -226,10 +226,10 @@ pub struct GeneratedImage {
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AITextEditMode {
-    Expand,         // Expand
-    Shorten,        // Shorten
-    Rewrite,        // Rewrite
-    FixGrammar,     // Fix Grammar
+    Expand,     // Expand
+    Shorten,    // Shorten
+    Rewrite,    // Rewrite
+    FixGrammar, // Fix Grammar
 }
 
 /// AI Text Edit Request
@@ -275,7 +275,7 @@ pub struct EditParams {
     #[validate(range(min = 1, max = 5))]
     pub num_candidates: u8,
     #[validate(length(max = 20))]
-    pub target_length: Option<String>,  // "shorter", "similar", "longer"
+    pub target_length: Option<String>, // "shorter", "similar", "longer"
     #[validate(length(max = 100))]
     pub tone: Option<String>,
     #[validate(length(min = 2, max = 10))]

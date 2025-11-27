@@ -51,6 +51,7 @@ pub struct ApplicationConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct QuotaConfig {
+    // Limits are expressed in weighted quota units (see AIOperation::cost)
     #[serde(default = "default_free_text_limit")]
     pub free_text_daily_limit: i32,
     #[serde(default = "default_free_image_limit")]
@@ -75,19 +76,19 @@ fn default_apple_environment() -> String {
 }
 
 fn default_free_text_limit() -> i32 {
-    3
+    15 // 3 highest-cost text operations (5 units each)
 }
 
 fn default_free_image_limit() -> i32 {
-    1
+    10 // 1 image generation (10 units)
 }
 
 fn default_pro_text_limit() -> i32 {
-    1000
+    5000 // 1000 highest-cost text operations
 }
 
 fn default_pro_image_limit() -> i32 {
-    50
+    500 // 50 image generations
 }
 
 impl Config {
