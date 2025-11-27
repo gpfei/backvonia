@@ -103,3 +103,30 @@ pub struct QuotaSubset {
     pub text_remaining_today: i32,
     pub image_remaining_today: i32,
 }
+
+/// AI Operation types with weighted quota costs
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AIOperation {
+    ContinueProse,
+    ContinueIdeas,
+    EditExpand,
+    EditShorten,
+    EditRewrite,
+    EditFixGrammar,
+    ImageGenerate,
+}
+
+impl AIOperation {
+    /// Get the quota cost for this operation
+    pub fn cost(&self) -> u32 {
+        match self {
+            AIOperation::ContinueProse => 5,
+            AIOperation::ContinueIdeas => 3,
+            AIOperation::EditExpand => 2,
+            AIOperation::EditShorten => 2,
+            AIOperation::EditRewrite => 2,
+            AIOperation::EditFixGrammar => 1,
+            AIOperation::ImageGenerate => 10, // Images are more expensive
+        }
+    }
+}

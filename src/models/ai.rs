@@ -3,10 +3,26 @@ use validator::Validate;
 
 use super::common::{PurchaseTier, QuotaSubset};
 
+/// AI Text Continue Mode
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AITextContinueMode {
+    Prose,  // Generate full prose continuation (default)
+    Ideas,  // Generate high-level continuation ideas or branch directions
+}
+
+impl Default for AITextContinueMode {
+    fn default() -> Self {
+        Self::Prose
+    }
+}
+
 /// AI Text Continue Request
 #[derive(Debug, Deserialize, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct AITextContinueRequest {
+    #[serde(default)]
+    pub mode: AITextContinueMode,
     #[validate(nested)]
     pub story_context: StoryContext,
     #[validate(length(min = 1, max = 50), nested)]
@@ -109,6 +125,8 @@ pub struct AITextContinueData {
 pub struct TextCandidate {
     pub id: String,
     pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     #[serde(default)]
     pub safety_flags: Vec<String>,
 }
@@ -204,6 +222,109 @@ pub struct GeneratedImage {
     pub height: u32,
 }
 
+/// AI Text Edit Mode
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AITextEditMode {
+    Expand,         // Expand
+    Shorten,        // Shorten
+    Rewrite,        // Rewrite
+    FixGrammar,     // Fix Grammar
+}
+
+/// AI Text Edit Request
+#[derive(Debug, Deserialize, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct AITextEditRequest {
+    pub mode: AITextEditMode,
+    #[serde(default)]
+    #[validate(nested)]
+    pub story_context: Option<StoryContextSimple>,
+    #[validate(nested)]
+    pub input: EditInput,
+    #[serde(default)]
+    #[validate(nested)]
+    pub edit_params: EditParams,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct StoryContextSimple {
+    #[validate(length(max = 500))]
+    pub title: Option<String>,
+    #[validate(length(min = 2, max = 10))]
+    pub language: Option<String>,
+    #[serde(default)]
+    #[validate(length(max = 20))]
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct EditInput {
+    #[validate(length(min = 1, max = 100000))]
+    pub text: String,
+    #[validate(length(max = 100000))]
+    pub selection: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct EditParams {
+    #[serde(default = "default_edit_candidates")]
+    #[validate(range(min = 1, max = 5))]
+    pub num_candidates: u8,
+    #[validate(length(max = 20))]
+    pub target_length: Option<String>,  // "shorter", "similar", "longer"
+    #[validate(length(max = 100))]
+    pub tone: Option<String>,
+    #[validate(length(min = 2, max = 10))]
+    pub language: Option<String>,
+    pub keep_style: Option<bool>,
+}
+
+impl Default for EditParams {
+    fn default() -> Self {
+        Self {
+            num_candidates: default_edit_candidates(),
+            target_length: None,
+            tone: None,
+            language: None,
+            keep_style: Some(true),
+        }
+    }
+}
+
+fn default_edit_candidates() -> u8 {
+    3
+}
+
+/// AI Text Edit Response
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AITextEditResponse {
+    pub success: bool,
+    pub data: AITextEditData,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AITextEditData {
+    pub purchase_tier: PurchaseTier,
+    pub quota: QuotaSubset,
+    pub mode: AITextEditMode,
+    pub candidates: Vec<TextEditCandidate>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextEditCandidate {
+    pub id: String,
+    pub content: String,
+    #[serde(default)]
+    pub safety_flags: Vec<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,6 +332,7 @@ mod tests {
 
     fn base_request() -> AITextContinueRequest {
         AITextContinueRequest {
+            mode: AITextContinueMode::default(),
             story_context: StoryContext {
                 title: Some("Test".to_string()),
                 tags: vec!["tag".to_string()],

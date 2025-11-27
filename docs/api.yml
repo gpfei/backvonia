@@ -356,8 +356,8 @@ components:
     AITextContinueMode:
       type: string
       enum:
-        - prose   # 正常续写正文（当前已有语义）
-        - ideas   # 只生成走向/分支/标题等创意想法
+        - prose    # Generate full prose continuation (default)
+        - ideas    # Generate high-level continuation ideas or branch directions
 
     AITextCandidate:
       type: object
@@ -396,7 +396,6 @@ components:
     AITextEditMode:
       type: string
       enum:
-        - generate_ideas   # Generate Ideas
         - expand           # Expand
         - shorten          # Shorten
         - rewrite          # Rewrite

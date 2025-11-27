@@ -5,9 +5,14 @@ use crate::{
     app_state::AppState,
     error::{ApiError, Result},
     middleware::IAPIdentity,
-    models::ai::{
-        AIImageGenerateData, AIImageGenerateRequest, AIImageGenerateResponse, AITextContinueData,
-        AITextContinueRequest, AITextContinueResponse,
+    models::{
+        ai::{
+            AIImageGenerateData, AIImageGenerateRequest, AIImageGenerateResponse,
+            AITextContinueData, AITextContinueMode, AITextContinueRequest,
+            AITextContinueResponse, AITextEditData, AITextEditMode, AITextEditRequest,
+            AITextEditResponse,
+        },
+        common::AIOperation,
     },
 };
 
@@ -27,16 +32,23 @@ pub async fn text_continue(
     let purchase_identity = &identity.purchase_identity;
     let tier = identity.purchase_tier;
 
-    // Atomically check and increment quota (prevents race conditions)
+    // Determine operation based on mode
+    let operation = match request.mode {
+        AITextContinueMode::Prose => AIOperation::ContinueProse,
+        AITextContinueMode::Ideas => AIOperation::ContinueIdeas,
+    };
+
+    // Atomically check and increment quota with weighted cost
     let quota_status = state
         .quota_service
-        .check_and_increment_text_quota(&purchase_identity, tier)
+        .check_and_increment_quota_weighted(&purchase_identity, tier, operation)
         .await?;
 
     // Generate candidates
     let candidates = state
         .ai_service
         .generate_text_continuations(
+            request.mode,
             &request.story_context,
             &request.path_nodes,
             &request.generation_params,
@@ -75,10 +87,10 @@ pub async fn image_generate(
     let purchase_identity = &identity.purchase_identity;
     let tier = identity.purchase_tier;
 
-    // Atomically check and increment quota (prevents race conditions)
+    // Atomically check and increment quota with weighted cost
     let quota_status = state
         .quota_service
-        .check_and_increment_image_quota(&purchase_identity, tier)
+        .check_and_increment_quota_weighted(&purchase_identity, tier, AIOperation::ImageGenerate)
         .await?;
 
     // Generate image
@@ -99,6 +111,64 @@ pub async fn image_generate(
             purchase_tier: tier,
             quota,
             image,
+        },
+    }))
+}
+
+/// POST /api/v1/ai/text/edit
+#[instrument(skip(state, identity, request))]
+pub async fn text_edit(
+    State(state): State<AppState>,
+    identity: IAPIdentity,
+    Json(request): Json<AITextEditRequest>,
+) -> Result<Json<AITextEditResponse>> {
+    // Validate request
+    use validator::Validate;
+    request
+        .validate()
+        .map_err(|e| ApiError::BadRequest(format!("Validation error: {}", e)))?;
+
+    let purchase_identity = &identity.purchase_identity;
+    let tier = identity.purchase_tier;
+
+    // Determine operation based on edit mode
+    let operation = match request.mode {
+        AITextEditMode::Expand => AIOperation::EditExpand,
+        AITextEditMode::Shorten => AIOperation::EditShorten,
+        AITextEditMode::Rewrite => AIOperation::EditRewrite,
+        AITextEditMode::FixGrammar => AIOperation::EditFixGrammar,
+    };
+
+    // Atomically check and increment quota with weighted cost
+    let quota_status = state
+        .quota_service
+        .check_and_increment_quota_weighted(&purchase_identity, tier, operation)
+        .await?;
+
+    // Generate edit candidates
+    let candidates = state
+        .ai_service
+        .generate_text_edit(
+            request.mode,
+            request.story_context.as_ref(),
+            &request.input,
+            &request.edit_params,
+        )
+        .await?;
+
+    // Build quota subset for response
+    let quota = crate::models::common::QuotaSubset {
+        text_remaining_today: quota_status.text_limit - quota_status.text_used,
+        image_remaining_today: quota_status.image_limit - quota_status.image_used,
+    };
+
+    Ok(Json(AITextEditResponse {
+        success: true,
+        data: AITextEditData {
+            purchase_tier: tier,
+            quota,
+            mode: request.mode,
+            candidates,
         },
     }))
 }

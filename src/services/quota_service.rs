@@ -1,7 +1,7 @@
 use crate::{
     config::QuotaConfig,
     error::{ApiError, Result},
-    models::common::{PurchaseTier, Quota, QuotaSubset},
+    models::common::{AIOperation, PurchaseTier, Quota, QuotaSubset},
 };
 use sea_orm::{
     entity::*, query::*, sea_query::OnConflict, DatabaseConnection, DatabaseTransaction,
@@ -144,6 +144,71 @@ impl QuotaService {
         info!(
             "Atomically checked and incremented image quota for identity: {} ({}/{})",
             identity, updated.image_count, image_limit
+        );
+
+        Ok(QuotaStatus {
+            text_used: updated.text_count,
+            text_limit,
+            image_used: updated.image_count,
+            image_limit,
+        })
+    }
+
+    /// Check and increment quota atomically with weighted cost
+    #[instrument(skip(self))]
+    pub async fn check_and_increment_quota_weighted(
+        &self,
+        identity: &str,
+        tier: PurchaseTier,
+        operation: AIOperation,
+    ) -> Result<QuotaStatus> {
+        let today = time::OffsetDateTime::now_utc().date();
+        let (text_limit, image_limit) = self.get_limits(tier);
+        let cost = operation.cost() as i32;
+
+        let txn = self.db.begin().await?;
+
+        // Lock the row for update
+        let usage = self.find_and_lock_usage(identity, today, &txn).await?;
+
+        // Check quota BEFORE incrementing based on operation type
+        let (is_image_op, current_usage, limit) = match operation {
+            AIOperation::ImageGenerate => (true, usage.image_count, image_limit),
+            _ => (false, usage.text_count, text_limit),
+        };
+
+        if current_usage + cost > limit {
+            txn.rollback().await?;
+            return Err(ApiError::QuotaExceeded(format!(
+                "Daily {} quota exceeded: {} + {} > {}",
+                if is_image_op { "image" } else { "text" },
+                current_usage,
+                cost,
+                limit
+            )));
+        }
+
+        // Increment by weighted cost
+        let mut usage_active: entity::quota_usage::ActiveModel = usage.into();
+        if is_image_op {
+            let current = usage_active.image_count.as_ref().to_owned();
+            usage_active.image_count = Set(current + cost);
+        } else {
+            let current = usage_active.text_count.as_ref().to_owned();
+            usage_active.text_count = Set(current + cost);
+        }
+        usage_active.updated_at = Set(time::OffsetDateTime::now_utc());
+        let updated = usage_active.update(&txn).await?;
+
+        txn.commit().await?;
+
+        info!(
+            "Atomically checked and incremented {} quota for identity: {} (+{}, {}/{})",
+            if is_image_op { "image" } else { "text" },
+            identity,
+            cost,
+            if is_image_op { updated.image_count } else { updated.text_count },
+            limit
         );
 
         Ok(QuotaStatus {
