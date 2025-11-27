@@ -60,6 +60,49 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+/ai/text/edit:
+  post:
+    tags: [AI]
+    summary: Apply AI text editing or transformation to existing text
+    operationId: aiTextEdit
+    parameters:
+      - $ref: '#/components/parameters/XClientVersion'
+      - $ref: '#/components/parameters/XPlatform'
+      - $ref: '#/components/parameters/XDeviceId'
+      - $ref: '#/components/parameters/XIAPPlatform'
+      - $ref: '#/components/parameters/XIAPReceipt'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AITextEditRequest'
+    responses:
+      '200':
+        description: AI edit result candidates
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AITextEditResponse'
+      '400':
+        description: Invalid request
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ErrorResponse'
+      '429':
+        description: Rate limited or quota exceeded
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ErrorResponse'
+      '500':
+        description: Server error
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ErrorResponse'
+
   /ai/image/generate:
     post:
       tags: [AI]
@@ -264,6 +307,11 @@ components:
     AITextContinueRequest:
       type: object
       properties:
+        mode:
+          $ref: '#/components/schemas/AITextContinueMode'
+          description: >
+            "prose" for full textual continuation, "ideas" for high-level branch or continuation ideas.
+          default: prose
         story_context:
           type: object
           properties:
@@ -305,6 +353,12 @@ components:
               default: true
       required: [story_context, path_nodes]
 
+    AITextContinueMode:
+      type: string
+      enum:
+        - prose   # 正常续写正文（当前已有语义）
+        - ideas   # 只生成走向/分支/标题等创意想法
+
     AITextCandidate:
       type: object
       properties:
@@ -312,6 +366,9 @@ components:
           type: string
         content:
           type: string
+        title:
+          type: string
+          nullable: true
         safety_flags:
           type: array
           items:
@@ -335,6 +392,95 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/AITextCandidate'
+
+    AITextEditMode:
+      type: string
+      enum:
+        - generate_ideas   # Generate Ideas
+        - expand           # Expand
+        - shorten          # Shorten
+        - rewrite          # Rewrite
+        - fix_grammar      # Fix Grammar
+
+    AITextEditRequest:
+      type: object
+      properties:
+        mode:
+          $ref: '#/components/schemas/AITextEditMode'
+        story_context:
+          type: object
+          nullable: true
+          properties:
+            title:
+              type: string
+            language:
+              type: string
+              example: en
+            tags:
+              type: array
+              items:
+                type: string
+          description: >
+            Optional. When present, can be used to generate ideas or keep story tone consistent.
+        input:
+          type: object
+          properties:
+            text:
+              type: string
+              description: The original text to edit or analyze.
+            selection:
+              type: string
+              nullable: true
+              description: Optional selected substring; if null, apply to whole text.
+        edit_params:
+          type: object
+          properties:
+            target_length:
+              type: string
+              enum: [shorter, similar, longer]
+            tone:
+              type: string
+              description: e.g. "neutral", "warm", "dark"
+            language:
+              type: string
+              description: Override language if needed
+            keep_style:
+              type: boolean
+              description: Try to keep original style when rewriting.
+      required: [mode, input]
+
+    AITextEditCandidate:
+      type: object
+      properties:
+        id:
+          type: string
+        content:
+          type: string
+        safety_flags:
+          type: array
+          items:
+            type: string
+
+    AITextEditResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            purchase_tier:
+              type: string
+              enum: [free, pro]
+            quota:
+              $ref: '#/components/schemas/QuotaSubset'
+            mode:
+              $ref: '#/components/schemas/AITextEditMode'
+            candidates:
+              type: array
+              items:
+                $ref: '#/components/schemas/AITextEditCandidate'
 
     QuotaSubset:
       type: object
