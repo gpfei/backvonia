@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
-use super::common::{IAPPlatform, PurchaseTier, Quota};
+use super::common::{IAPPlatform, PurchaseTier};
 
 /// IAP Verify Request
 #[derive(Debug, Deserialize, Validate)]
@@ -32,21 +32,6 @@ pub struct IAPVerifyData {
     pub product_id: Option<String>,
     pub valid_until: Option<time::OffsetDateTime>,
     pub platform: IAPPlatform,
-}
-
-/// Quota Response
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct QuotaResponse {
-    pub success: bool,
-    pub data: QuotaData,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct QuotaData {
-    pub purchase_tier: PurchaseTier,
-    pub quota: Quota,
 }
 
 /// Internal structure for IAP verification result

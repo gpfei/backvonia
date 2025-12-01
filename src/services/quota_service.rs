@@ -279,6 +279,11 @@ impl QuotaService {
             usage_date: Set(date),
             text_count: Set(0),
             image_count: Set(0),
+            extra_credits_total: Set(0),
+            subscription_credits: Set(0),
+            subscription_monthly_allocation: Set(0),
+            last_extra_credits_sync: Set(None),
+            subscription_resets_at: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
         };
@@ -337,6 +342,11 @@ impl QuotaService {
             usage_date: Set(date),
             text_count: Set(0),
             image_count: Set(0),
+            extra_credits_total: Set(0),
+            subscription_credits: Set(0),
+            subscription_monthly_allocation: Set(0),
+            last_extra_credits_sync: Set(None),
+            subscription_resets_at: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
         };

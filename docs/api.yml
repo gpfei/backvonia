@@ -6,6 +6,12 @@ info:
     Backend API for Talevonia MVP – a branching, AI-assisted personal storytelling app.
     Identity and quota are derived from IAP receipts (no user accounts).
 
+    Credit System:
+    - Pro tier users receive 1000 subscription credits per month (expire monthly)
+    - All users can purchase extra credits (100, 500, or 2000 packs) that never expire
+    - Credits consumed in order: subscription first, then extra credits (FIFO by purchase date)
+    - Credits replace daily quotas entirely
+
 servers:
   - url: https://api.talevonia.app/api/v1
     description: Production
@@ -190,7 +196,7 @@ paths:
   /quota:
     get:
       tags: [IAP]
-      summary: Get current AI quotas
+      summary: Get current credit balance and quota information
       operationId: getQuota
       parameters:
         - $ref: '#/components/parameters/XClientVersion'
@@ -200,13 +206,56 @@ paths:
         - $ref: '#/components/parameters/XIAPReceipt'
       responses:
         '200':
-          description: Quota status
+          description: Credits and quota status
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/QuotaResponse'
+                $ref: '#/components/schemas/CreditsQuotaResponse'
         '400':
           description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /credits/purchase:
+    post:
+      tags: [IAP]
+      summary: Record a credit purchase from IAP
+      operationId: recordCreditPurchase
+      parameters:
+        - $ref: '#/components/parameters/XClientVersion'
+        - $ref: '#/components/parameters/XPlatform'
+        - $ref: '#/components/parameters/XDeviceId'
+        - $ref: '#/components/parameters/XIAPPlatform'
+        - $ref: '#/components/parameters/XIAPReceipt'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreditPurchaseRequest'
+      responses:
+        '200':
+          description: Credit purchase recorded successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditPurchaseResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Duplicate transaction (already processed)
           content:
             application/json:
               schema:
@@ -286,22 +335,53 @@ components:
           type: object
           additionalProperties: true
 
-    # Quota
-    Quota:
+    # Credits
+    SubscriptionCreditsInfo:
       type: object
       properties:
-        text_limit_daily:
+        current:
           type: integer
-        text_used_today:
+          description: Current subscription credits available
+        monthlyAllocation:
           type: integer
-        text_remaining_today:
+          description: Total monthly allocation for Pro tier
+        resetsAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When subscription credits will reset
+
+    CreditPurchaseRecord:
+      type: object
+      properties:
+        transactionId:
+          type: string
+        productId:
+          type: string
+        amount:
           type: integer
-        image_limit_daily:
+          description: Original credit amount purchased
+        consumed:
           type: integer
-        image_used_today:
+          description: Credits already consumed from this purchase
+        remaining:
           type: integer
-        image_remaining_today:
+          description: Credits still available from this purchase
+        purchaseDate:
+          type: string
+          format: date-time
+
+    ExtraCreditsInfo:
+      type: object
+      properties:
+        total:
           type: integer
+          description: Total extra credits available (sum of all purchase remainings)
+        purchases:
+          type: array
+          description: Individual credit purchases (FIFO order)
+          items:
+            $ref: '#/components/schemas/CreditPurchaseRecord'
 
     # AI Text Continue
     AITextContinueRequest:
@@ -483,11 +563,17 @@ components:
 
     QuotaSubset:
       type: object
+      description: Simplified quota information returned with AI operations
       properties:
-        text_remaining_today:
+        subscriptionCredits:
           type: integer
-        image_remaining_today:
+          description: Remaining subscription credits
+        extraCredits:
           type: integer
+          description: Remaining extra credits
+        totalCredits:
+          type: integer
+          description: Total remaining credits
 
     # AI Image Generate
     AIImageGenerateRequest:
@@ -597,8 +683,8 @@ components:
               type: string
               enum: [apple, google]
 
-    # Quota Response
-    QuotaResponse:
+    # Credits Quota Response
+    CreditsQuotaResponse:
       type: object
       properties:
         success:
@@ -607,8 +693,70 @@ components:
         data:
           type: object
           properties:
-            purchase_tier:
+            purchaseTier:
               type: string
               enum: [free, pro]
+            subscriptionCredits:
+              $ref: '#/components/schemas/SubscriptionCreditsInfo'
+            extraCredits:
+              $ref: '#/components/schemas/ExtraCreditsInfo'
+            totalCredits:
+              type: integer
+              description: Total available credits (subscription + extra)
+
+    # Credit Purchase Request/Response
+    CreditPurchaseRequest:
+      type: object
+      properties:
+        transactionId:
+          type: string
+          description: Unique IAP transaction ID (idempotency key)
+        originalTransactionId:
+          type: string
+          nullable: true
+          description: Original transaction ID (for subscription renewals)
+        productId:
+          type: string
+          description: Product ID (e.g., com.talevonia.tale.credits.500)
+        purchaseDate:
+          type: string
+          format: date-time
+          description: Purchase timestamp from IAP receipt
+        receipt:
+          type: string
+          nullable: true
+          description: Base64-encoded receipt (optional)
+      required: [transactionId, productId, purchaseDate]
+
+    CreditPurchaseResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            creditsAdded:
+              type: integer
+              description: Credits added from this purchase
+            totalExtraCredits:
+              type: integer
+              description: Total extra credits after purchase
+            purchaseId:
+              type: string
+              format: uuid
+              description: Internal purchase record ID
             quota:
-              $ref: '#/components/schemas/Quota'
+              $ref: '#/components/schemas/CreditsQuotaInfo'
+
+    CreditsQuotaInfo:
+      type: object
+      properties:
+        subscriptionCredits:
+          $ref: '#/components/schemas/SubscriptionCreditsInfo'
+        extraCredits:
+          $ref: '#/components/schemas/ExtraCreditsInfo'
+        totalCredits:
+          type: integer
+          description: Total available credits

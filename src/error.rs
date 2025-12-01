@@ -28,6 +28,9 @@ pub enum ApiError {
     #[error("Unauthorized: {0}")]
     Unauthorized(String),
 
+    #[error("Conflict: {0}")]
+    Conflict(String),
+
     #[error("Rate limit exceeded")]
     RateLimitExceeded,
 
@@ -67,6 +70,7 @@ impl IntoResponse for ApiError {
             ApiError::Unauthorized(ref msg) => {
                 (StatusCode::UNAUTHORIZED, "UNAUTHORIZED", msg.clone())
             }
+            ApiError::Conflict(ref msg) => (StatusCode::CONFLICT, "CONFLICT", msg.clone()),
             ApiError::RateLimitExceeded => (
                 StatusCode::TOO_MANY_REQUESTS,
                 "RATE_LIMIT_EXCEEDED",

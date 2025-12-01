@@ -7,13 +7,18 @@ use serde::{Deserialize, Serialize};
 #[sea_orm(table_name = "quota_usage")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub id: uuid::Uuid,
+    pub id: Uuid,
     pub purchase_identity: String,
-    pub usage_date: time::Date,
+    pub usage_date: TimeDate,
     pub text_count: i32,
     pub image_count: i32,
-    pub created_at: time::OffsetDateTime,
-    pub updated_at: time::OffsetDateTime,
+    pub created_at: TimeDateTimeWithTimeZone,
+    pub updated_at: TimeDateTimeWithTimeZone,
+    pub extra_credits_total: i32,
+    pub subscription_credits: i32,
+    pub subscription_monthly_allocation: i32,
+    pub last_extra_credits_sync: Option<TimeDateTimeWithTimeZone>,
+    pub subscription_resets_at: Option<TimeDateTimeWithTimeZone>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

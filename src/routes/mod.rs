@@ -1,5 +1,6 @@
 // Route modules
 pub mod ai;
+pub mod credits;
 pub mod iap;
 
 use crate::{
@@ -34,13 +35,13 @@ fn api_v1_routes(state: AppState) -> Router<AppState> {
         ));
 
     // Auth-only routes (no rate limiting)
-    let auth_only_routes =
-        Router::new()
-            .route("/quota", get(iap::get_quota))
-            .layer(middleware::from_fn_with_state(
-                state.clone(),
-                iap_auth_middleware,
-            ));
+    let auth_only_routes = Router::new()
+        .route("/quota", get(credits::get_credits_quota)) // Returns credits-aware quota
+        .route("/credits/purchase", post(credits::record_credit_purchase))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            iap_auth_middleware,
+        ));
 
     // Public routes (no authentication required)
     let public_routes = Router::new().route("/iap/verify", post(iap::verify_iap));

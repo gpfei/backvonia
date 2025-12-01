@@ -20,6 +20,7 @@ use axum::{
 pub struct IAPIdentity {
     pub purchase_identity: String,
     pub purchase_tier: PurchaseTier,
+    pub platform: IAPPlatform,
 }
 
 /// Authentication middleware that verifies IAP receipts
@@ -57,6 +58,7 @@ pub async fn iap_auth_middleware(
     let identity = IAPIdentity {
         purchase_identity: verification.purchase_identity,
         purchase_tier: verification.purchase_tier,
+        platform,
     };
 
     request.extensions_mut().insert(identity);

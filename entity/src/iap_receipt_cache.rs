@@ -7,16 +7,16 @@ use serde::{Deserialize, Serialize};
 #[sea_orm(table_name = "iap_receipt_cache")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub id: uuid::Uuid,
+    pub id: Uuid,
     #[sea_orm(unique)]
     pub purchase_identity: String,
     pub platform: String,
     pub purchase_tier: String,
     pub product_id: Option<String>,
     pub receipt_hash: Option<String>,
-    pub valid_until: Option<time::OffsetDateTime>,
-    pub last_verified_at: time::OffsetDateTime,
-    pub created_at: time::OffsetDateTime,
+    pub valid_until: Option<TimeDateTimeWithTimeZone>,
+    pub last_verified_at: TimeDateTimeWithTimeZone,
+    pub created_at: TimeDateTimeWithTimeZone,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
