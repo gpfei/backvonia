@@ -13,7 +13,7 @@ impl MigrationTrait for Migration {
                     .table(CreditPurchases::Table)
                     .if_not_exists()
                     .col(pk_uuid(CreditPurchases::Id))
-                    .col(string(CreditPurchases::LocalUserId).not_null())
+                    .col(uuid(CreditPurchases::UserId).not_null())
                     .col(string_null(CreditPurchases::OriginalTransactionId))
                     .col(
                         string(CreditPurchases::TransactionId)
@@ -33,6 +33,13 @@ impl MigrationTrait for Migration {
                     .col(text_null(CreditPurchases::ReceiptData))
                     .col(timestamp_with_time_zone_null(CreditPurchases::RevokedAt))
                     .col(string_null(CreditPurchases::RevokedReason))
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_credit_purchases_user_id")
+                            .from(CreditPurchases::Table, CreditPurchases::UserId)
+                            .to(Users::Table, Users::Id)
+                            .on_delete(ForeignKeyAction::Cascade),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -41,9 +48,9 @@ impl MigrationTrait for Migration {
         manager
             .create_index(
                 Index::create()
-                    .name("idx_credit_purchases_local_user_id")
+                    .name("idx_credit_purchases_user_id")
                     .table(CreditPurchases::Table)
-                    .col(CreditPurchases::LocalUserId)
+                    .col(CreditPurchases::UserId)
                     .to_owned(),
             )
             .await?;
@@ -74,7 +81,7 @@ impl MigrationTrait for Migration {
                 Index::create()
                     .name("idx_credit_purchases_user_purchase_date")
                     .table(CreditPurchases::Table)
-                    .col(CreditPurchases::LocalUserId)
+                    .col(CreditPurchases::UserId)
                     .col(CreditPurchases::PurchaseDate)
                     .to_owned(),
             )
@@ -135,11 +142,18 @@ impl MigrationTrait for Migration {
     }
 }
 
+// Reference to Users table from first migration
+#[derive(DeriveIden)]
+enum Users {
+    Table,
+    Id,
+}
+
 #[derive(DeriveIden)]
 enum CreditPurchases {
     Table,
     Id,
-    LocalUserId,
+    UserId,  // Changed from LocalUserId
     OriginalTransactionId,
     TransactionId,
     ProductId,

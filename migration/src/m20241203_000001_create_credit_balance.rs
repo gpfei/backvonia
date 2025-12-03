@@ -19,8 +19,8 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(
-                        ColumnDef::new(UserCreditBalance::PurchaseIdentity)
-                            .string()
+                        ColumnDef::new(UserCreditBalance::UserId)
+                            .uuid()
                             .not_null(),
                     )
                     .col(
@@ -56,17 +56,24 @@ impl MigrationTrait for Migration {
                             .timestamp_with_time_zone()
                             .not_null(),
                     )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_user_credit_balance_user_id")
+                            .from(UserCreditBalance::Table, UserCreditBalance::UserId)
+                            .to(Users::Table, Users::Id)
+                            .on_delete(ForeignKeyAction::Cascade),
+                    )
                     .to_owned(),
             )
             .await?;
 
-        // Create unique index on purchase_identity
+        // Create unique index on user_id
         manager
             .create_index(
                 Index::create()
-                    .name("idx_credit_balance_purchase_identity")
+                    .name("idx_credit_balance_user_id")
                     .table(UserCreditBalance::Table)
-                    .col(UserCreditBalance::PurchaseIdentity)
+                    .col(UserCreditBalance::UserId)
                     .unique()
                     .to_owned(),
             )
@@ -82,11 +89,18 @@ impl MigrationTrait for Migration {
     }
 }
 
+// Reference to Users table from first migration
+#[derive(DeriveIden)]
+enum Users {
+    Table,
+    Id,
+}
+
 #[derive(DeriveIden)]
 enum UserCreditBalance {
     Table,
     Id,
-    PurchaseIdentity,
+    UserId,  // Changed from PurchaseIdentity
     SubscriptionCredits,
     SubscriptionMonthlyAllocation,
     SubscriptionResetsAt,

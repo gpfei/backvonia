@@ -4,18 +4,18 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
-#[sea_orm(table_name = "user_credit_balance")]
+#[sea_orm(table_name = "user_auth_methods")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
-    #[sea_orm(unique)]
     pub user_id: Uuid,
-    pub subscription_credits: i32,
-    pub subscription_monthly_allocation: i32,
-    pub subscription_resets_at: Option<TimeDateTimeWithTimeZone>,
-    pub extra_credits_remaining: i32,
-    pub last_updated: TimeDateTimeWithTimeZone,
-    pub created_at: TimeDateTimeWithTimeZone,
+    pub provider: String,
+    pub provider_user_id: String,
+    pub provider_email: Option<String>,
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub provider_metadata: Option<Json>,
+    pub first_linked_at: TimeDateTimeWithTimeZone,
+    pub last_used_at: TimeDateTimeWithTimeZone,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

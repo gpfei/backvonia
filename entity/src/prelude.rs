@@ -3,4 +3,7 @@
 pub use super::credit_purchases::Entity as CreditPurchases;
 pub use super::iap_receipt_cache::Entity as IapReceiptCache;
 pub use super::quota_usage::Entity as QuotaUsage;
+pub use super::user_auth_methods::Entity as UserAuthMethods;
 pub use super::user_credit_balance::Entity as UserCreditBalance;
+pub use super::user_iap_receipts::Entity as UserIapReceipts;
+pub use super::users::Entity as Users;

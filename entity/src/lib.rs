@@ -5,4 +5,8 @@ pub mod prelude;
 pub mod credit_purchases;
 pub mod iap_receipt_cache;
 pub mod quota_usage;
+pub mod sea_orm_active_enums;
+pub mod user_auth_methods;
 pub mod user_credit_balance;
+pub mod user_iap_receipts;
+pub mod users;

@@ -5,38 +5,44 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
-#[sea_orm(table_name = "iap_receipt_cache")]
+#[sea_orm(table_name = "user_iap_receipts")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
-    pub user_id: Option<Uuid>,
-    #[sea_orm(unique)]
+    pub user_id: Uuid,
     pub original_transaction_id: String,
     pub platform: String,
+    pub is_family_shared: bool,
+    pub family_primary_user_id: Option<Uuid>,
+    pub product_id: String,
     pub purchase_tier: AccountTier,
-    pub product_id: Option<String>,
-    pub receipt_hash: Option<String>,
-    pub valid_until: Option<TimeDateTimeWithTimeZone>,
+    pub subscription_status: Option<String>,
+    pub expires_at: Option<TimeDateTimeWithTimeZone>,
+    pub receipt_hash: String,
     pub last_verified_at: TimeDateTimeWithTimeZone,
+    pub first_linked_at: TimeDateTimeWithTimeZone,
     pub created_at: TimeDateTimeWithTimeZone,
+    pub updated_at: TimeDateTimeWithTimeZone,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
         belongs_to = "super::users::Entity",
-        from = "Column::UserId",
+        from = "Column::FamilyPrimaryUserId",
         to = "super::users::Column::Id",
         on_update = "NoAction",
         on_delete = "SetNull"
     )]
-    Users,
-}
-
-impl Related<super::users::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Users.def()
-    }
+    Users2,
+    #[sea_orm(
+        belongs_to = "super::users::Entity",
+        from = "Column::UserId",
+        to = "super::users::Column::Id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    Users1,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

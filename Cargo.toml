@@ -62,5 +62,8 @@ validator = { version = "0.18", features = ["derive"] }
 # Crypto
 sha2 = "0.10"
 
+# JWT authentication
+jsonwebtoken = "9"
+
 [dev-dependencies]
 futures = "0.3"
