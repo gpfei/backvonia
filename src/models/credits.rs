@@ -92,19 +92,6 @@ pub struct CreditsQuotaData {
     pub subscription_credits: SubscriptionCreditsInfo,
     pub extra_credits: ExtraCreditsInfo,
     pub total_credits: i32,
-    // Keep legacy daily quota for backward compatibility
-    pub daily_quota: Option<LegacyDailyQuota>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LegacyDailyQuota {
-    pub text_limit_daily: i32,
-    pub text_used_today: i32,
-    pub text_remaining_today: i32,
-    pub image_limit_daily: i32,
-    pub image_used_today: i32,
-    pub image_remaining_today: i32,
 }
 
 /// Error response for duplicate transaction

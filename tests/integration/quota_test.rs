@@ -1,6 +1,6 @@
 use backvonia::{
     config::{Config, QuotaConfig},
-    models::common::PurchaseTier,
+    models::common::{AIOperation, PurchaseTier},
     services::QuotaService,
 };
 use migration::{Migrator, MigratorTrait};
@@ -39,7 +39,8 @@ async fn test_quota_race_condition_prevented() {
     let config = create_test_quota_config();
     let service = Arc::new(QuotaService::new(db, &config));
 
-    // Test identity with free tier (limit = 3)
+    // Test identity with free tier (15 credits from subscription)
+    // Each ContinueProse operation costs 5 credits, so should allow 3 operations
     let identity = format!("test_identity_{}", uuid::Uuid::new_v4());
     let tier = PurchaseTier::Free;
 
@@ -52,13 +53,15 @@ async fn test_quota_race_condition_prevented() {
         let identity = identity.clone();
         let barrier = Arc::clone(&barrier);
 
-        let handle = tokio::spawn(async move {
+        let handle: tokio::task::JoinHandle<
+            backvonia::error::Result<backvonia::services::quota_service::QuotaStatus>,
+        > = tokio::spawn(async move {
             // Wait for all tasks to be ready
             barrier.wait().await;
 
-            // Try to increment quota atomically
+            // Try to use credits atomically (ContinueProse = 5 credits)
             service
-                .check_and_increment_text_quota(&identity, tier)
+                .check_and_increment_quota_weighted(&identity, tier, AIOperation::ContinueProse)
                 .await
         });
 
@@ -66,21 +69,28 @@ async fn test_quota_race_condition_prevented() {
     }
 
     // Collect results
-    let results: Vec<_> = futures::future::join_all(handles)
-        .await
-        .into_iter()
-        .map(|r| r.unwrap())
-        .collect();
+    let results: Vec<backvonia::error::Result<backvonia::services::quota_service::QuotaStatus>> =
+        futures::future::join_all(handles)
+            .await
+            .into_iter()
+            .map(|r| r.unwrap())
+            .collect();
 
     // Count successes and failures
     let successes = results.iter().filter(|r| r.is_ok()).count();
     let failures = results.iter().filter(|r| r.is_err()).count();
 
-    // With atomic check+increment, exactly 3 should succeed (free tier limit)
-    assert_eq!(successes, 3, "Expected exactly 3 successful quota increments");
+    // With atomic check+increment, exactly 3 should succeed (15 credits / 5 per operation)
+    assert_eq!(
+        successes, 3,
+        "Expected exactly 3 successful quota increments"
+    );
     assert_eq!(failures, 7, "Expected 7 quota exceeded errors");
 
-    println!("✅ Quota race condition test passed: {}/10 succeeded", successes);
+    println!(
+        "✅ Quota race condition test passed: {}/10 succeeded",
+        successes
+    );
 }
 
 #[tokio::test]
@@ -92,30 +102,33 @@ async fn test_quota_check_and_increment_atomic() {
     let identity = format!("test_atomic_{}", uuid::Uuid::new_v4());
     let tier = PurchaseTier::Free;
 
-    // First increment should succeed
+    // First operation should succeed (ContinueProse = 5 credits)
     let result1 = service
-        .check_and_increment_text_quota(&identity, tier)
+        .check_and_increment_quota_weighted(&identity, tier, AIOperation::ContinueProse)
         .await;
     assert!(result1.is_ok());
-    assert_eq!(result1.unwrap().text_used, 1);
+    let status1 = result1.unwrap();
+    assert_eq!(status1.total_credits_remaining, 10); // 15 - 5 = 10
 
-    // Second increment should succeed
+    // Second operation should succeed
     let result2 = service
-        .check_and_increment_text_quota(&identity, tier)
+        .check_and_increment_quota_weighted(&identity, tier, AIOperation::ContinueProse)
         .await;
     assert!(result2.is_ok());
-    assert_eq!(result2.unwrap().text_used, 2);
+    let status2 = result2.unwrap();
+    assert_eq!(status2.total_credits_remaining, 5); // 10 - 5 = 5
 
-    // Third increment should succeed
+    // Third operation should succeed
     let result3 = service
-        .check_and_increment_text_quota(&identity, tier)
+        .check_and_increment_quota_weighted(&identity, tier, AIOperation::ContinueProse)
         .await;
     assert!(result3.is_ok());
-    assert_eq!(result3.unwrap().text_used, 3);
+    let status3 = result3.unwrap();
+    assert_eq!(status3.total_credits_remaining, 0); // 5 - 5 = 0
 
-    // Fourth increment should fail (quota exceeded)
+    // Fourth operation should fail (quota exceeded)
     let result4 = service
-        .check_and_increment_text_quota(&identity, tier)
+        .check_and_increment_quota_weighted(&identity, tier, AIOperation::ContinueProse)
         .await;
     assert!(result4.is_err());
 
@@ -131,11 +144,11 @@ async fn test_quota_pro_tier_limits() {
     let identity = format!("test_pro_{}", uuid::Uuid::new_v4());
     let tier = PurchaseTier::Pro;
 
-    // Pro tier should have higher limits
+    // Pro tier should have higher subscription credits (5000)
     let quota_info = service.get_quota_info(&identity, tier).await.unwrap();
 
-    assert_eq!(quota_info.text_limit_daily, 1000);
-    assert_eq!(quota_info.image_limit_daily, 50);
+    assert_eq!(quota_info.subscription_credits, 5000);
+    assert_eq!(quota_info.total_credits_remaining, 5000);
 
     println!("✅ Pro tier quota limits test passed");
 }

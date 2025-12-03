@@ -130,26 +130,49 @@ impl CreditsService {
         Ok(total)
     }
 
-    /// Recalculate and update extra_credits_total in quota_usage
+    /// Recalculate and update extra_credits_remaining in user_credit_balance
+    /// This is the CRITICAL method that makes purchased credits usable by QuotaService
     async fn recalculate_extra_credits_txn(
         &self,
         local_user_id: &str,
         txn: &DatabaseTransaction,
     ) -> Result<i32> {
-        // Calculate total from purchases
+        // Calculate total remaining from purchases
         let purchases = entity::credit_purchases::Entity::find()
             .filter(entity::credit_purchases::Column::LocalUserId.eq(local_user_id))
             .filter(entity::credit_purchases::Column::RevokedAt.is_null())
             .all(txn)
             .await?;
 
-        let total: i32 = purchases.iter().map(|p| p.remaining()).sum();
-
-        // Update quota_usage record
-        let today = time::OffsetDateTime::now_utc().date();
+        let total_remaining: i32 = purchases.iter().map(|p| p.remaining()).sum();
         let now = time::OffsetDateTime::now_utc();
 
-        // Find or create quota_usage for today
+        // CRITICAL FIX: Update user_credit_balance.extra_credits_remaining
+        // This is what QuotaService reads to check if user has credits!
+        //
+        // IMPORTANT: We only UPDATE existing balances, never INSERT.
+        // Rationale: CreditsService doesn't know the user's tier (free/pro),
+        // so we can't correctly initialize subscription_credits/subscription_monthly_allocation.
+        // QuotaService creates the balance on first quota check with proper tier information.
+        // This ensures users don't lose subscription credits regardless of first touchpoint.
+        let balance = entity::user_credit_balance::Entity::find()
+            .filter(entity::user_credit_balance::Column::PurchaseIdentity.eq(local_user_id))
+            .one(txn)
+            .await?;
+
+        if let Some(balance) = balance {
+            // Update existing balance (normal case after first quota check)
+            let mut balance_active: entity::user_credit_balance::ActiveModel = balance.into();
+            balance_active.extra_credits_remaining = Set(total_remaining);
+            balance_active.last_updated = Set(now);
+            balance_active.update(txn).await?;
+        }
+        // If balance doesn't exist, do nothing here.
+        // QuotaService will create it properly with tier information on first use.
+
+        // Also update quota_usage for backward compatibility and analytics
+        // (but QuotaService no longer reads from here)
+        let today = now.date();
         let quota_usage = entity::quota_usage::Entity::find()
             .filter(entity::quota_usage::Column::PurchaseIdentity.eq(local_user_id))
             .filter(entity::quota_usage::Column::UsageDate.eq(today))
@@ -157,21 +180,19 @@ impl CreditsService {
             .await?;
 
         if let Some(quota) = quota_usage {
-            // Update existing
             let mut quota_active: entity::quota_usage::ActiveModel = quota.into();
-            quota_active.extra_credits_total = Set(total);
+            quota_active.extra_credits_total = Set(total_remaining);
             quota_active.last_extra_credits_sync = Set(Some(now));
             quota_active.updated_at = Set(now);
             quota_active.update(txn).await?;
         } else {
-            // Create new record
             let new_quota = entity::quota_usage::ActiveModel {
                 id: Set(Uuid::new_v4()),
                 purchase_identity: Set(local_user_id.to_string()),
                 usage_date: Set(today),
                 text_count: Set(0),
                 image_count: Set(0),
-                extra_credits_total: Set(total),
+                extra_credits_total: Set(total_remaining),
                 subscription_credits: Set(0),
                 subscription_monthly_allocation: Set(0),
                 last_extra_credits_sync: Set(Some(now)),
@@ -197,7 +218,7 @@ impl CreditsService {
                 .await?;
         }
 
-        Ok(total)
+        Ok(total_remaining)
     }
 
     /// Consume credits using correct order: subscription FIRST, then extra credits
@@ -304,54 +325,54 @@ impl CreditsService {
     }
 
     /// Check if user has sufficient credits
+    /// CRITICAL FIX: Now reads from user_credit_balance
     #[instrument(skip(self))]
     pub async fn check_sufficient_credits(
         &self,
         local_user_id: &str,
         required: i32,
     ) -> Result<bool> {
-        let extra = self.calculate_total_extra_credits(local_user_id).await?;
-
-        let today = time::OffsetDateTime::now_utc().date();
-        let quota = entity::quota_usage::Entity::find()
-            .filter(entity::quota_usage::Column::PurchaseIdentity.eq(local_user_id))
-            .filter(entity::quota_usage::Column::UsageDate.eq(today))
+        // Read from user_credit_balance (accurate balance)
+        let balance = entity::user_credit_balance::Entity::find()
+            .filter(entity::user_credit_balance::Column::PurchaseIdentity.eq(local_user_id))
             .one(&self.db)
             .await?;
 
-        let subscription = quota.map(|q| q.subscription_credits).unwrap_or(0);
-        let total = extra + subscription;
+        let total = if let Some(balance) = balance {
+            balance.subscription_credits + balance.extra_credits_remaining
+        } else {
+            0
+        };
 
         Ok(total >= required)
     }
 
     /// Get complete credits quota information
+    /// CRITICAL FIX: Now reads from user_credit_balance instead of quota_usage
     #[instrument(skip(self))]
     pub async fn get_credits_quota(&self, local_user_id: &str) -> Result<CreditsQuotaInfo> {
-        let today = time::OffsetDateTime::now_utc().date();
-
-        // Get quota_usage record
-        let quota = entity::quota_usage::Entity::find()
-            .filter(entity::quota_usage::Column::PurchaseIdentity.eq(local_user_id))
-            .filter(entity::quota_usage::Column::UsageDate.eq(today))
+        // CRITICAL FIX: Read from user_credit_balance (where QuotaService updates balances)
+        // NOT from quota_usage (which is only used for daily analytics now)
+        let balance = entity::user_credit_balance::Entity::find()
+            .filter(entity::user_credit_balance::Column::PurchaseIdentity.eq(local_user_id))
             .one(&self.db)
             .await?
-            .unwrap_or_else(|| entity::quota_usage::Model {
-                id: Uuid::new_v4(),
-                purchase_identity: local_user_id.to_string(),
-                usage_date: today,
-                text_count: 0,
-                image_count: 0,
-                extra_credits_total: 0,
-                subscription_credits: 0,
-                subscription_monthly_allocation: 0,
-                last_extra_credits_sync: None,
-                subscription_resets_at: None,
-                created_at: time::OffsetDateTime::now_utc(),
-                updated_at: time::OffsetDateTime::now_utc(),
+            .unwrap_or_else(|| {
+                // Default balance if user doesn't exist yet
+                let now = time::OffsetDateTime::now_utc();
+                entity::user_credit_balance::Model {
+                    id: Uuid::new_v4(),
+                    purchase_identity: local_user_id.to_string(),
+                    subscription_credits: 0,
+                    subscription_monthly_allocation: 0,
+                    subscription_resets_at: None,
+                    extra_credits_remaining: 0,
+                    last_updated: now,
+                    created_at: now,
+                }
             });
 
-        // Get all purchases
+        // Get all purchases for detailed breakdown
         let purchases = self.get_user_purchases(local_user_id).await?;
         let purchase_records: Vec<CreditPurchaseRecord> = purchases
             .iter()
@@ -365,19 +386,20 @@ impl CreditsService {
             })
             .collect();
 
-        let extra_credits_total: i32 = purchases.iter().map(|p| p.remaining()).sum();
+        // Use balance.extra_credits_remaining from user_credit_balance (accurate!)
+        let extra_credits_total = balance.extra_credits_remaining;
 
         Ok(CreditsQuotaInfo {
             subscription_credits: SubscriptionCreditsInfo {
-                current: quota.subscription_credits,
-                monthly_allocation: quota.subscription_monthly_allocation,
-                resets_at: quota.subscription_resets_at,
+                current: balance.subscription_credits,
+                monthly_allocation: balance.subscription_monthly_allocation,
+                resets_at: balance.subscription_resets_at,
             },
             extra_credits: ExtraCreditsInfo {
                 total: extra_credits_total,
                 purchases: purchase_records,
             },
-            total_credits: quota.subscription_credits + extra_credits_total,
+            total_credits: balance.subscription_credits + extra_credits_total,
         })
     }
 }

@@ -2,7 +2,6 @@
 ///
 /// This test verifies that concurrent purchase requests with the same transaction_id
 /// are handled correctly - one succeeds, others get 409 Conflict, no 500 errors.
-
 use backvonia::models::common::IAPPlatform;
 use backvonia::services::CreditsService;
 use sea_orm::{Database, DatabaseConnection};
@@ -12,8 +11,9 @@ use uuid::Uuid;
 
 /// Helper to setup test database
 async fn setup_test_db() -> DatabaseConnection {
-    let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgresql://myuser:mypassword@192.168.123.187:5432/talevonia".to_string());
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        "postgresql://myuser:mypassword@192.168.123.187:5432/talevonia".to_string()
+    });
 
     Database::connect(&db_url)
         .await
@@ -62,24 +62,24 @@ async fn test_concurrent_duplicate_transactions() {
 
     while let Some(result) = tasks.join_next().await {
         match result {
-            Ok((task_id, purchase_result)) => {
-                match purchase_result {
-                    Ok(_) => {
-                        println!("Task {} succeeded", task_id);
-                        success_count += 1;
-                    }
-                    Err(e) => {
-                        let err_str = e.to_string();
-                        if err_str.contains("already processed") || err_str.to_lowercase().contains("conflict") {
-                            println!("Task {} got expected Conflict: {}", task_id, err_str);
-                            conflict_count += 1;
-                        } else {
-                            println!("Task {} got unexpected error: {}", task_id, err_str);
-                            other_error_count += 1;
-                        }
+            Ok((task_id, purchase_result)) => match purchase_result {
+                Ok(_) => {
+                    println!("Task {} succeeded", task_id);
+                    success_count += 1;
+                }
+                Err(e) => {
+                    let err_str = e.to_string();
+                    if err_str.contains("already processed")
+                        || err_str.to_lowercase().contains("conflict")
+                    {
+                        println!("Task {} got expected Conflict: {}", task_id, err_str);
+                        conflict_count += 1;
+                    } else {
+                        println!("Task {} got unexpected error: {}", task_id, err_str);
+                        other_error_count += 1;
                     }
                 }
-            }
+            },
             Err(e) => {
                 println!("Task panicked: {:?}", e);
                 other_error_count += 1;

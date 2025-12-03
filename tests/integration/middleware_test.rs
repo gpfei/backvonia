@@ -1,5 +1,5 @@
 use backvonia::middleware::IAPIdentity;
-use backvonia::models::common::PurchaseTier;
+use backvonia::models::common::{IAPPlatform, PurchaseTier};
 
 #[test]
 fn test_iap_identity_struct() {
@@ -7,10 +7,12 @@ fn test_iap_identity_struct() {
     let identity = IAPIdentity {
         purchase_identity: "test_user_123".to_string(),
         purchase_tier: PurchaseTier::Free,
+        platform: IAPPlatform::Apple,
     };
 
     assert_eq!(identity.purchase_identity, "test_user_123");
     assert_eq!(identity.purchase_tier, PurchaseTier::Free);
+    assert_eq!(identity.platform, IAPPlatform::Apple);
 }
 
 #[test]

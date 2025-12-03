@@ -38,7 +38,7 @@ pub async fn text_continue(
     };
 
     // Atomically check and increment quota with weighted cost
-    let quota_status = state
+    state
         .quota_service
         .check_and_increment_quota_weighted(&purchase_identity, tier, operation)
         .await?;
@@ -54,19 +54,9 @@ pub async fn text_continue(
         )
         .await?;
 
-    // Build quota subset for response
-    let quota = crate::models::common::QuotaSubset {
-        text_remaining_today: quota_status.text_limit - quota_status.text_used,
-        image_remaining_today: quota_status.image_limit - quota_status.image_used,
-    };
-
     Ok(Json(AITextContinueResponse {
         success: true,
-        data: AITextContinueData {
-            purchase_tier: tier,
-            quota,
-            candidates,
-        },
+        data: AITextContinueData { candidates },
     }))
 }
 
@@ -87,7 +77,7 @@ pub async fn image_generate(
     let tier = identity.purchase_tier;
 
     // Atomically check and increment quota with weighted cost
-    let quota_status = state
+    state
         .quota_service
         .check_and_increment_quota_weighted(&purchase_identity, tier, AIOperation::ImageGenerate)
         .await?;
@@ -98,19 +88,9 @@ pub async fn image_generate(
         .generate_image(&request.story_context, &request.node, &request.image_params)
         .await?;
 
-    // Build quota subset for response
-    let quota = crate::models::common::QuotaSubset {
-        text_remaining_today: quota_status.text_limit - quota_status.text_used,
-        image_remaining_today: quota_status.image_limit - quota_status.image_used,
-    };
-
     Ok(Json(AIImageGenerateResponse {
         success: true,
-        data: AIImageGenerateData {
-            purchase_tier: tier,
-            quota,
-            image,
-        },
+        data: AIImageGenerateData { image },
     }))
 }
 
@@ -139,7 +119,7 @@ pub async fn text_edit(
     };
 
     // Atomically check and increment quota with weighted cost
-    let quota_status = state
+    state
         .quota_service
         .check_and_increment_quota_weighted(&purchase_identity, tier, operation)
         .await?;
@@ -155,17 +135,9 @@ pub async fn text_edit(
         )
         .await?;
 
-    // Build quota subset for response
-    let quota = crate::models::common::QuotaSubset {
-        text_remaining_today: quota_status.text_limit - quota_status.text_used,
-        image_remaining_today: quota_status.image_limit - quota_status.image_used,
-    };
-
     Ok(Json(AITextEditResponse {
         success: true,
         data: AITextEditData {
-            purchase_tier: tier,
-            quota,
             mode: request.mode,
             candidates,
         },

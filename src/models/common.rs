@@ -84,24 +84,30 @@ impl IAPPlatform {
     }
 }
 
-/// Quota information
+/// Quota information (full details)
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Quota {
-    pub text_limit_daily: i32,
-    pub text_used_today: i32,
-    pub text_remaining_today: i32,
-    pub image_limit_daily: i32,
-    pub image_used_today: i32,
-    pub image_remaining_today: i32,
+    // Subscription credits (monthly allocation)
+    pub subscription_credits: i32,
+    pub subscription_monthly_allocation: i32,
+    pub subscription_resets_at: Option<String>, // ISO 8601 timestamp
+
+    // Extra purchased credits
+    pub extra_credits_total: i32,
+    pub extra_credits_consumed: i32,
+    pub extra_credits_remaining: i32,
+
+    // Total available credits
+    pub total_credits_remaining: i32,
 }
 
-/// Subset of quota info for responses
+/// Subset of quota info for AI API responses
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QuotaSubset {
-    pub text_remaining_today: i32,
-    pub image_remaining_today: i32,
+    // Total remaining credits (usable for any operation: text or image)
+    pub credits_remaining: i32,
 }
 
 /// AI Operation types with weighted quota costs

@@ -463,11 +463,6 @@ components:
         data:
           type: object
           properties:
-            purchase_tier:
-              type: string
-              enum: [free, pro]
-            quota:
-              $ref: '#/components/schemas/QuotaSubset'
             candidates:
               type: array
               items:
@@ -549,31 +544,12 @@ components:
         data:
           type: object
           properties:
-            purchase_tier:
-              type: string
-              enum: [free, pro]
-            quota:
-              $ref: '#/components/schemas/QuotaSubset'
             mode:
               $ref: '#/components/schemas/AITextEditMode'
             candidates:
               type: array
               items:
                 $ref: '#/components/schemas/AITextEditCandidate'
-
-    QuotaSubset:
-      type: object
-      description: Simplified quota information returned with AI operations
-      properties:
-        subscriptionCredits:
-          type: integer
-          description: Remaining subscription credits
-        extraCredits:
-          type: integer
-          description: Remaining extra credits
-        totalCredits:
-          type: integer
-          description: Total remaining credits
 
     # AI Image Generate
     AIImageGenerateRequest:
@@ -634,11 +610,6 @@ components:
         data:
           type: object
           properties:
-            purchase_tier:
-              type: string
-              enum: [free, pro]
-            quota:
-              $ref: '#/components/schemas/QuotaSubset'
             image:
               $ref: '#/components/schemas/GeneratedImage'
 
@@ -702,7 +673,80 @@ components:
               $ref: '#/components/schemas/ExtraCreditsInfo'
             totalCredits:
               type: integer
-              description: Total available credits (subscription + extra)
+              description: Total remaining credits (subscription + extra)
+              example: 750
+
+    SubscriptionCreditsInfo:
+      type: object
+      description: Subscription credits that expire monthly
+      properties:
+        current:
+          type: integer
+          description: Remaining subscription credits for current period
+          example: 250
+        monthlyAllocation:
+          type: integer
+          description: Monthly subscription credit allocation
+          example: 1000
+        resetsAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When subscription credits will reset (ISO 8601)
+          example: "2025-01-01T00:00:00Z"
+
+    ExtraCreditsInfo:
+      type: object
+      description: Extra purchased credits that never expire
+      properties:
+        total:
+          type: integer
+          description: Total extra credits remaining
+          example: 500
+        purchases:
+          type: array
+          description: Breakdown of individual credit purchases
+          items:
+            $ref: '#/components/schemas/CreditPurchaseRecord'
+
+    CreditPurchaseRecord:
+      type: object
+      description: Individual credit purchase record
+      properties:
+        transactionId:
+          type: string
+          example: "1000000123456789"
+        productId:
+          type: string
+          example: "com.talevonia.credits_500"
+        amount:
+          type: integer
+          description: Original credit amount purchased
+          example: 500
+        consumed:
+          type: integer
+          description: Credits consumed from this purchase
+          example: 50
+        remaining:
+          type: integer
+          description: Credits remaining from this purchase
+          example: 450
+        purchaseDate:
+          type: string
+          format: date-time
+          description: When this purchase was made (ISO 8601)
+          example: "2024-12-01T10:30:00Z"
+
+    # Legacy Quota (deprecated, kept for backward compatibility)
+    Quota:
+      type: object
+      deprecated: true
+      description: Deprecated - use CreditsQuotaResponse structure instead
+      properties:
+        totalCreditsRemaining:
+          type: integer
+          description: Total remaining credits (subscription + extra)
+          example: 700
 
     # Credit Purchase Request/Response
     CreditPurchaseRequest:

@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
-use super::common::{PurchaseTier, QuotaSubset};
-
 /// AI Text Continue Mode
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -115,8 +113,6 @@ pub struct AITextContinueResponse {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AITextContinueData {
-    pub purchase_tier: PurchaseTier,
-    pub quota: QuotaSubset,
     pub candidates: Vec<TextCandidate>,
 }
 
@@ -208,8 +204,6 @@ pub struct AIImageGenerateResponse {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AIImageGenerateData {
-    pub purchase_tier: PurchaseTier,
-    pub quota: QuotaSubset,
     pub image: GeneratedImage,
 }
 
@@ -310,8 +304,6 @@ pub struct AITextEditResponse {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AITextEditData {
-    pub purchase_tier: PurchaseTier,
-    pub quota: QuotaSubset,
     pub mode: AITextEditMode,
     pub candidates: Vec<TextEditCandidate>,
 }

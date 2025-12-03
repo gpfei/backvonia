@@ -31,3 +31,5 @@ tarpaulin-report.html
 # Database
 *.db
 *.sqlite
+
+docs/

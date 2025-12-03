@@ -8,7 +8,7 @@ use crate::{
     middleware::IAPIdentity,
     models::credits::{
         CreditPurchaseData, CreditPurchaseRequest, CreditPurchaseResponse, CreditsQuotaData,
-        CreditsQuotaResponse, LegacyDailyQuota,
+        CreditsQuotaResponse,
     },
 };
 
@@ -73,21 +73,6 @@ pub async fn get_credits_quota(
         .get_credits_quota(&identity.purchase_identity)
         .await?;
 
-    // Get legacy daily quota for backward compatibility
-    let legacy_quota = state
-        .quota_service
-        .get_quota_info(&identity.purchase_identity, identity.purchase_tier)
-        .await
-        .ok()
-        .map(|q| LegacyDailyQuota {
-            text_limit_daily: q.text_limit_daily,
-            text_used_today: q.text_used_today,
-            text_remaining_today: q.text_remaining_today,
-            image_limit_daily: q.image_limit_daily,
-            image_used_today: q.image_used_today,
-            image_remaining_today: q.image_remaining_today,
-        });
-
     Ok(Json(CreditsQuotaResponse {
         success: true,
         data: CreditsQuotaData {
@@ -95,7 +80,6 @@ pub async fn get_credits_quota(
             subscription_credits: quota_info.subscription_credits.clone(),
             extra_credits: quota_info.extra_credits.clone(),
             total_credits: quota_info.total_credits,
-            daily_quota: legacy_quota,
         },
     }))
 }

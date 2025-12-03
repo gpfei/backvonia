@@ -12,6 +12,9 @@ name = "backvonia"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+path = "src/lib.rs"
+
 [dependencies]
 # Web framework
 axum = { version = "0.8", features = ["http2", "macros"] }

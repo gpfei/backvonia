@@ -2,6 +2,7 @@ pub use sea_orm_migration::prelude::*;
 
 mod m20220101_000001_create_table;
 mod m20241201_000001_add_extra_credits;
+mod m20241203_000001_create_credit_balance;
 
 pub struct Migrator;
 
@@ -11,6 +12,7 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(m20220101_000001_create_table::Migration),
             Box::new(m20241201_000001_add_extra_credits::Migration),
+            Box::new(m20241203_000001_create_credit_balance::Migration),
         ]
     }
 }

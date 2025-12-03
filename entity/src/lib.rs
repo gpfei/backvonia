@@ -5,3 +5,4 @@ pub mod prelude;
 pub mod credit_purchases;
 pub mod iap_receipt_cache;
 pub mod quota_usage;
+pub mod user_credit_balance;

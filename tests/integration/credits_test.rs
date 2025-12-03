@@ -1,12 +1,14 @@
 use backvonia::models::common::IAPPlatform;
+use backvonia::models::credit_purchases_ext::CreditPurchaseExt;
 use backvonia::services::CreditsService;
 use sea_orm::{Database, DatabaseConnection};
 use uuid::Uuid;
 
 /// Helper to setup test database
 async fn setup_test_db() -> DatabaseConnection {
-    let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgresql://myuser:mypassword@192.168.123.187:5432/talevonia".to_string());
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        "postgresql://myuser:mypassword@192.168.123.187:5432/talevonia".to_string()
+    });
 
     Database::connect(&db_url)
         .await
@@ -106,7 +108,10 @@ async fn test_consumption_order_subscription_first() {
         .expect("Failed to record second purchase");
 
     // Verify total credits
-    let total = service.calculate_total_extra_credits(&user_id).await.unwrap();
+    let total = service
+        .calculate_total_extra_credits(&user_id)
+        .await
+        .unwrap();
     assert_eq!(total, 600);
 
     // Consume 150 credits
@@ -119,7 +124,10 @@ async fn test_consumption_order_subscription_first() {
     assert_eq!(breakdown.from_extra, 150);
 
     // Verify remaining credits
-    let remaining = service.calculate_total_extra_credits(&user_id).await.unwrap();
+    let remaining = service
+        .calculate_total_extra_credits(&user_id)
+        .await
+        .unwrap();
     assert_eq!(remaining, 450); // 600 - 150
 
     // Get purchases and verify FIFO consumption within extra credits
