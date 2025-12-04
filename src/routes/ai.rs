@@ -28,7 +28,7 @@ pub async fn text_continue(
         .validate()
         .map_err(|e| ApiError::BadRequest(format!("Validation error: {}", e)))?;
 
-    let tier = identity.account_tier;
+    let tier = &identity.account_tier;
 
     // Determine operation based on mode
     let operation = match request.mode {
@@ -72,7 +72,7 @@ pub async fn image_generate(
         .validate()
         .map_err(|e| ApiError::BadRequest(format!("Validation error: {}", e)))?;
 
-    let tier = identity.account_tier;
+    let tier = &identity.account_tier;
 
     // Atomically check and increment quota with weighted cost
     state
@@ -105,7 +105,7 @@ pub async fn text_edit(
         .validate()
         .map_err(|e| ApiError::BadRequest(format!("Validation error: {}", e)))?;
 
-    let tier = identity.account_tier;
+    let tier = &identity.account_tier;
 
     // Determine operation based on edit mode
     let operation = match request.mode {

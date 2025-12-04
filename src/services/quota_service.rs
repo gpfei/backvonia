@@ -1,8 +1,9 @@
 use crate::{
     config::QuotaConfig,
     error::{ApiError, Result},
-    models::common::{AIOperation, PurchaseTier, Quota, QuotaSubset},
+    models::common::{AIOperation, Quota, QuotaSubset},
 };
+use entity::sea_orm_active_enums::AccountTier;
 use sea_orm::{
     entity::*, query::*, sea_query::OnConflict, DatabaseConnection, DatabaseTransaction,
     TransactionTrait,
@@ -36,17 +37,18 @@ impl QuotaService {
     }
 
     /// Get monthly allocation for a tier
-    fn get_monthly_allocation(&self, tier: PurchaseTier) -> i32 {
+    fn get_monthly_allocation(&self, tier: &AccountTier) -> i32 {
         match tier {
-            PurchaseTier::Free => self.config.free_text_daily_limit, // Treat as monthly for now
-            PurchaseTier::Pro => self.config.pro_text_daily_limit,   // Treat as monthly for now
+            AccountTier::Free => self.config.free_text_daily_limit,       // Treat as monthly for now
+            AccountTier::Pro => self.config.pro_text_daily_limit,         // Treat as monthly for now
+            AccountTier::Enterprise => self.config.pro_text_daily_limit * 2, // Double pro limits for enterprise
         }
     }
 
     /// Check current quota status for a user
     /// Returns total available credits (subscription + extra purchases)
     #[instrument(skip(self))]
-    pub async fn check_quota(&self, user_id: Uuid, tier: PurchaseTier) -> Result<QuotaStatus> {
+    pub async fn check_quota(&self, user_id: Uuid, tier: &AccountTier) -> Result<QuotaStatus> {
         // Get or create credit balance
         let balance = self.get_or_create_credit_balance(user_id, tier).await?;
 
@@ -71,7 +73,7 @@ impl QuotaService {
     pub async fn check_and_increment_quota_weighted(
         &self,
         user_id: Uuid,
-        tier: PurchaseTier,
+        tier: &AccountTier,
         operation: AIOperation,
     ) -> Result<QuotaStatus> {
         let cost = operation.cost() as i32;
@@ -158,7 +160,7 @@ impl QuotaService {
     }
 
     /// Get full quota info
-    pub async fn get_quota_info(&self, user_id: Uuid, tier: PurchaseTier) -> Result<Quota> {
+    pub async fn get_quota_info(&self, user_id: Uuid, tier: &AccountTier) -> Result<Quota> {
         let status = self.check_quota(user_id, tier).await?;
 
         // Query total purchased credits
@@ -193,7 +195,7 @@ impl QuotaService {
     pub async fn get_quota_subset(
         &self,
         user_id: Uuid,
-        tier: PurchaseTier,
+        tier: &AccountTier,
     ) -> Result<QuotaSubset> {
         let status = self.check_quota(user_id, tier).await?;
 
@@ -207,7 +209,7 @@ impl QuotaService {
     pub async fn add_extra_credits(
         &self,
         user_id: Uuid,
-        tier: PurchaseTier,
+        tier: &AccountTier,
         amount: i32,
     ) -> Result<()> {
         let txn = self.db.begin().await?;
@@ -239,7 +241,7 @@ impl QuotaService {
     async fn get_or_create_credit_balance(
         &self,
         user_id: Uuid,
-        tier: PurchaseTier,
+        tier: &AccountTier,
     ) -> Result<entity::user_credit_balance::Model> {
         // Try to find existing balance
         if let Some(balance) = entity::user_credit_balance::Entity::find()
@@ -306,7 +308,7 @@ impl QuotaService {
     async fn find_and_lock_credit_balance(
         &self,
         user_id: Uuid,
-        tier: PurchaseTier,
+        tier: &AccountTier,
         txn: &DatabaseTransaction,
     ) -> Result<entity::user_credit_balance::Model> {
         // Try to find with lock
@@ -374,7 +376,7 @@ impl QuotaService {
     async fn reset_subscription_if_needed(
         &self,
         balance: entity::user_credit_balance::Model,
-        tier: PurchaseTier,
+        tier: &AccountTier,
     ) -> Result<entity::user_credit_balance::Model> {
         let now = time::OffsetDateTime::now_utc();
 
@@ -409,7 +411,7 @@ impl QuotaService {
     async fn reset_subscription_if_needed_tx(
         &self,
         balance: entity::user_credit_balance::Model,
-        tier: PurchaseTier,
+        tier: &AccountTier,
         txn: &DatabaseTransaction,
     ) -> Result<entity::user_credit_balance::Model> {
         let now = time::OffsetDateTime::now_utc();
