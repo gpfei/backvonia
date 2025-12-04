@@ -28,6 +28,15 @@ pub enum ApiError {
     #[error("Unauthorized: {0}")]
     Unauthorized(String),
 
+    #[error("Invalid token: {0}")]
+    InvalidToken(String),
+
+    #[error("Token expired")]
+    ExpiredToken,
+
+    #[error("User not found: {0}")]
+    UserNotFound(String),
+
     #[error("Conflict: {0}")]
     Conflict(String),
 
@@ -69,6 +78,17 @@ impl IntoResponse for ApiError {
             ApiError::NotFound(ref msg) => (StatusCode::NOT_FOUND, "NOT_FOUND", msg.clone()),
             ApiError::Unauthorized(ref msg) => {
                 (StatusCode::UNAUTHORIZED, "UNAUTHORIZED", msg.clone())
+            }
+            ApiError::InvalidToken(ref msg) => {
+                (StatusCode::UNAUTHORIZED, "INVALID_TOKEN", msg.clone())
+            }
+            ApiError::ExpiredToken => (
+                StatusCode::UNAUTHORIZED,
+                "EXPIRED_TOKEN",
+                "Token has expired".to_string(),
+            ),
+            ApiError::UserNotFound(ref msg) => {
+                (StatusCode::NOT_FOUND, "USER_NOT_FOUND", msg.clone())
             }
             ApiError::Conflict(ref msg) => (StatusCode::CONFLICT, "CONFLICT", msg.clone()),
             ApiError::RateLimitExceeded => (

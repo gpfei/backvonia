@@ -1,10 +1,16 @@
 // Service modules
 pub mod ai_service;
+pub mod auth_service;
 pub mod credits_service;
 pub mod iap_service;
+pub mod jwt_service;
 pub mod quota_service;
+pub mod refresh_token_service;
 
 pub use ai_service::AIService;
+pub use auth_service::AuthService;
 pub use credits_service::CreditsService;
 pub use iap_service::IAPService;
+pub use jwt_service::JWTService;
 pub use quota_service::QuotaService;
+pub use refresh_token_service::RefreshTokenService;

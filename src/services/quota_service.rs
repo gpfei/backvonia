@@ -43,12 +43,12 @@ impl QuotaService {
         }
     }
 
-    /// Check current quota status for a purchase identity
+    /// Check current quota status for a user
     /// Returns total available credits (subscription + extra purchases)
     #[instrument(skip(self))]
-    pub async fn check_quota(&self, identity: &str, tier: PurchaseTier) -> Result<QuotaStatus> {
+    pub async fn check_quota(&self, user_id: Uuid, tier: PurchaseTier) -> Result<QuotaStatus> {
         // Get or create credit balance
-        let balance = self.get_or_create_credit_balance(identity, tier).await?;
+        let balance = self.get_or_create_credit_balance(user_id, tier).await?;
 
         // Check if subscription needs reset
         let balance = self.reset_subscription_if_needed(balance, tier).await?;
@@ -70,7 +70,7 @@ impl QuotaService {
     #[instrument(skip(self))]
     pub async fn check_and_increment_quota_weighted(
         &self,
-        identity: &str,
+        user_id: Uuid,
         tier: PurchaseTier,
         operation: AIOperation,
     ) -> Result<QuotaStatus> {
@@ -81,7 +81,7 @@ impl QuotaService {
 
         // 1. Lock credit balance (persistent across days)
         let balance = self
-            .find_and_lock_credit_balance(identity, tier, &txn)
+            .find_and_lock_credit_balance(user_id, tier, &txn)
             .await?;
 
         // 2. Check subscription reset
@@ -120,7 +120,7 @@ impl QuotaService {
         let updated_balance = balance_active.update(&txn).await?;
 
         // 5. Update daily consumption log (for analytics)
-        let usage = self.find_and_lock_usage(identity, today, &txn).await?;
+        let usage = self.find_and_lock_usage(user_id, today, &txn).await?;
         let mut usage_active: entity::quota_usage::ActiveModel = usage.into();
 
         let is_image_op = matches!(operation, AIOperation::ImageGenerate);
@@ -141,10 +141,10 @@ impl QuotaService {
             updated_balance.subscription_credits + updated_balance.extra_credits_remaining;
 
         info!(
-            "Deducted {} credits for {} operation by identity: {} (remaining: {})",
+            "Deducted {} credits for {} operation by user: {} (remaining: {})",
             cost,
             if is_image_op { "image" } else { "text" },
-            identity,
+            user_id,
             total_remaining
         );
 
@@ -158,12 +158,12 @@ impl QuotaService {
     }
 
     /// Get full quota info
-    pub async fn get_quota_info(&self, identity: &str, tier: PurchaseTier) -> Result<Quota> {
-        let status = self.check_quota(identity, tier).await?;
+    pub async fn get_quota_info(&self, user_id: Uuid, tier: PurchaseTier) -> Result<Quota> {
+        let status = self.check_quota(user_id, tier).await?;
 
         // Query total purchased credits
         let total_purchased = entity::credit_purchases::Entity::find()
-            .filter(entity::credit_purchases::Column::LocalUserId.eq(identity))
+            .filter(entity::credit_purchases::Column::UserId.eq(user_id))
             .filter(entity::credit_purchases::Column::RevokedAt.is_null())
             .select_only()
             .column_as(
@@ -192,10 +192,10 @@ impl QuotaService {
     /// Get quota subset for AI API responses (DEPRECATED - quota no longer returned in AI responses)
     pub async fn get_quota_subset(
         &self,
-        identity: &str,
+        user_id: Uuid,
         tier: PurchaseTier,
     ) -> Result<QuotaSubset> {
-        let status = self.check_quota(identity, tier).await?;
+        let status = self.check_quota(user_id, tier).await?;
 
         Ok(QuotaSubset {
             credits_remaining: status.total_credits_remaining,
@@ -206,14 +206,14 @@ impl QuotaService {
     #[instrument(skip(self))]
     pub async fn add_extra_credits(
         &self,
-        identity: &str,
+        user_id: Uuid,
         tier: PurchaseTier,
         amount: i32,
     ) -> Result<()> {
         let txn = self.db.begin().await?;
 
         let balance = self
-            .find_and_lock_credit_balance(identity, tier, &txn)
+            .find_and_lock_credit_balance(user_id, tier, &txn)
             .await?;
         let mut balance_active: entity::user_credit_balance::ActiveModel = balance.into();
 
@@ -225,9 +225,9 @@ impl QuotaService {
         txn.commit().await?;
 
         info!(
-            "Added {} extra credits to identity: {} (new total extra: {})",
+            "Added {} extra credits to user: {} (new total extra: {})",
             amount,
-            identity,
+            user_id,
             current_extra + amount
         );
 
@@ -238,12 +238,12 @@ impl QuotaService {
     /// IMPORTANT: When creating, syncs extra credits from credit_purchases
     async fn get_or_create_credit_balance(
         &self,
-        identity: &str,
+        user_id: Uuid,
         tier: PurchaseTier,
     ) -> Result<entity::user_credit_balance::Model> {
         // Try to find existing balance
         if let Some(balance) = entity::user_credit_balance::Entity::find()
-            .filter(entity::user_credit_balance::Column::PurchaseIdentity.eq(identity))
+            .filter(entity::user_credit_balance::Column::UserId.eq(user_id))
             .one(&self.db)
             .await?
         {
@@ -253,7 +253,7 @@ impl QuotaService {
         // Calculate extra credits from purchases
         // This handles the case where user bought credits BEFORE first quota check
         let purchases = entity::credit_purchases::Entity::find()
-            .filter(entity::credit_purchases::Column::LocalUserId.eq(identity))
+            .filter(entity::credit_purchases::Column::UserId.eq(user_id))
             .filter(entity::credit_purchases::Column::RevokedAt.is_null())
             .all(&self.db)
             .await?;
@@ -270,7 +270,7 @@ impl QuotaService {
 
         let new_balance = entity::user_credit_balance::ActiveModel {
             id: Set(Uuid::new_v4()),
-            purchase_identity: Set(identity.to_string()),
+            user_id: Set(user_id),
             subscription_credits: Set(monthly_allocation),
             subscription_monthly_allocation: Set(monthly_allocation),
             subscription_resets_at: Set(Some(next_month)),
@@ -282,7 +282,7 @@ impl QuotaService {
         // Insert with ON CONFLICT DO NOTHING (race condition safety)
         entity::user_credit_balance::Entity::insert(new_balance)
             .on_conflict(
-                OnConflict::column(entity::user_credit_balance::Column::PurchaseIdentity)
+                OnConflict::column(entity::user_credit_balance::Column::UserId)
                     .do_nothing()
                     .to_owned(),
             )
@@ -291,7 +291,7 @@ impl QuotaService {
 
         // Return the existing or newly-inserted row
         entity::user_credit_balance::Entity::find()
-            .filter(entity::user_credit_balance::Column::PurchaseIdentity.eq(identity))
+            .filter(entity::user_credit_balance::Column::UserId.eq(user_id))
             .one(&self.db)
             .await?
             .ok_or_else(|| {
@@ -305,13 +305,13 @@ impl QuotaService {
     /// IMPORTANT: When creating, syncs extra credits from credit_purchases
     async fn find_and_lock_credit_balance(
         &self,
-        identity: &str,
+        user_id: Uuid,
         tier: PurchaseTier,
         txn: &DatabaseTransaction,
     ) -> Result<entity::user_credit_balance::Model> {
         // Try to find with lock
         let balance = entity::user_credit_balance::Entity::find()
-            .filter(entity::user_credit_balance::Column::PurchaseIdentity.eq(identity))
+            .filter(entity::user_credit_balance::Column::UserId.eq(user_id))
             .lock_exclusive()
             .one(txn)
             .await?;
@@ -323,7 +323,7 @@ impl QuotaService {
         // Calculate extra credits from purchases
         // This handles the case where user bought credits BEFORE first quota check
         let purchases = entity::credit_purchases::Entity::find()
-            .filter(entity::credit_purchases::Column::LocalUserId.eq(identity))
+            .filter(entity::credit_purchases::Column::UserId.eq(user_id))
             .filter(entity::credit_purchases::Column::RevokedAt.is_null())
             .all(txn)
             .await?;
@@ -340,7 +340,7 @@ impl QuotaService {
 
         let new_balance = entity::user_credit_balance::ActiveModel {
             id: Set(Uuid::new_v4()),
-            purchase_identity: Set(identity.to_string()),
+            user_id: Set(user_id),
             subscription_credits: Set(monthly_allocation),
             subscription_monthly_allocation: Set(monthly_allocation),
             subscription_resets_at: Set(Some(next_month)),
@@ -351,7 +351,7 @@ impl QuotaService {
 
         entity::user_credit_balance::Entity::insert(new_balance)
             .on_conflict(
-                OnConflict::column(entity::user_credit_balance::Column::PurchaseIdentity)
+                OnConflict::column(entity::user_credit_balance::Column::UserId)
                     .do_nothing()
                     .to_owned(),
             )
@@ -359,7 +359,7 @@ impl QuotaService {
             .await?;
 
         entity::user_credit_balance::Entity::find()
-            .filter(entity::user_credit_balance::Column::PurchaseIdentity.eq(identity))
+            .filter(entity::user_credit_balance::Column::UserId.eq(user_id))
             .lock_exclusive()
             .one(txn)
             .await?
@@ -394,8 +394,8 @@ impl QuotaService {
                 let updated = balance_active.update(&self.db).await?;
 
                 info!(
-                    "Reset subscription credits for identity: {} to {}",
-                    updated.purchase_identity, monthly_allocation
+                    "Reset subscription credits for user: {} to {}",
+                    updated.user_id, monthly_allocation
                 );
 
                 return Ok(updated);
@@ -430,8 +430,8 @@ impl QuotaService {
                 let updated = balance_active.update(txn).await?;
 
                 info!(
-                    "Reset subscription credits for identity: {} to {}",
-                    updated.purchase_identity, monthly_allocation
+                    "Reset subscription credits for user: {} to {}",
+                    updated.user_id, monthly_allocation
                 );
 
                 return Ok(updated);
@@ -444,7 +444,7 @@ impl QuotaService {
     /// Helper: Get or create usage record for a date (daily analytics log).
     async fn get_or_create_usage(
         &self,
-        identity: &str,
+        user_id: Uuid,
         date: time::Date,
     ) -> Result<entity::quota_usage::Model> {
         let now = time::OffsetDateTime::now_utc();
@@ -452,7 +452,7 @@ impl QuotaService {
         // Try to insert a row; if it already exists, do nothing.
         let new_usage = entity::quota_usage::ActiveModel {
             id: Set(Uuid::new_v4()),
-            purchase_identity: Set(identity.to_string()),
+            user_id: Set(user_id),
             usage_date: Set(date),
             text_count: Set(0),
             image_count: Set(0),
@@ -469,7 +469,7 @@ impl QuotaService {
         entity::quota_usage::Entity::insert(new_usage)
             .on_conflict(
                 OnConflict::columns([
-                    entity::quota_usage::Column::PurchaseIdentity,
+                    entity::quota_usage::Column::UserId,
                     entity::quota_usage::Column::UsageDate,
                 ])
                 .do_nothing()
@@ -480,7 +480,7 @@ impl QuotaService {
 
         // Return the existing or newly-inserted row.
         entity::quota_usage::Entity::find()
-            .filter(entity::quota_usage::Column::PurchaseIdentity.eq(identity))
+            .filter(entity::quota_usage::Column::UserId.eq(user_id))
             .filter(entity::quota_usage::Column::UsageDate.eq(date))
             .one(&self.db)
             .await?
@@ -494,13 +494,13 @@ impl QuotaService {
     /// Helper: Find and lock usage record for update
     async fn find_and_lock_usage(
         &self,
-        identity: &str,
+        user_id: Uuid,
         date: time::Date,
         txn: &DatabaseTransaction,
     ) -> Result<entity::quota_usage::Model> {
         // Try to find with lock
         let usage = entity::quota_usage::Entity::find()
-            .filter(entity::quota_usage::Column::PurchaseIdentity.eq(identity))
+            .filter(entity::quota_usage::Column::UserId.eq(user_id))
             .filter(entity::quota_usage::Column::UsageDate.eq(date))
             .lock_exclusive()
             .one(txn)
@@ -515,7 +515,7 @@ impl QuotaService {
 
         let new_usage = entity::quota_usage::ActiveModel {
             id: Set(Uuid::new_v4()),
-            purchase_identity: Set(identity.to_string()),
+            user_id: Set(user_id),
             usage_date: Set(date),
             text_count: Set(0),
             image_count: Set(0),
@@ -531,7 +531,7 @@ impl QuotaService {
         entity::quota_usage::Entity::insert(new_usage)
             .on_conflict(
                 OnConflict::columns([
-                    entity::quota_usage::Column::PurchaseIdentity,
+                    entity::quota_usage::Column::UserId,
                     entity::quota_usage::Column::UsageDate,
                 ])
                 .do_nothing()
@@ -541,7 +541,7 @@ impl QuotaService {
             .await?;
 
         entity::quota_usage::Entity::find()
-            .filter(entity::quota_usage::Column::PurchaseIdentity.eq(identity))
+            .filter(entity::quota_usage::Column::UserId.eq(user_id))
             .filter(entity::quota_usage::Column::UsageDate.eq(date))
             .lock_exclusive()
             .one(txn)

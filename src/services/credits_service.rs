@@ -29,7 +29,7 @@ impl CreditsService {
     #[instrument(skip(self, receipt_data))]
     pub async fn record_purchase(
         &self,
-        local_user_id: &str,
+        user_id: Uuid,
         original_transaction_id: Option<&str>,
         transaction_id: &str,
         product_id: &str,
@@ -47,7 +47,7 @@ impl CreditsService {
 
         let new_purchase = entity::credit_purchases::ActiveModel {
             id: Set(purchase_id),
-            local_user_id: Set(local_user_id.to_string()),
+            user_id: Set(user_id),
             original_transaction_id: Set(original_transaction_id.map(|s| s.to_string())),
             transaction_id: Set(transaction_id.to_string()),
             product_id: Set(product_id.to_string()),
@@ -94,13 +94,13 @@ impl CreditsService {
 
         // Successfully inserted - recalculate totals
         let total_extra = self
-            .recalculate_extra_credits_txn(local_user_id, &txn)
+            .recalculate_extra_credits_txn(user_id, &txn)
             .await?;
         txn.commit().await?;
 
         info!(
             "Recorded credit purchase: user={}, transaction={}, amount={}, total_extra={}",
-            local_user_id, transaction_id, amount, total_extra
+            user_id, transaction_id, amount, total_extra
         );
 
         Ok((purchase_id, total_extra))
@@ -110,10 +110,10 @@ impl CreditsService {
     #[instrument(skip(self))]
     pub async fn get_user_purchases(
         &self,
-        local_user_id: &str,
+        user_id: Uuid,
     ) -> Result<Vec<entity::credit_purchases::Model>> {
         let purchases = entity::credit_purchases::Entity::find()
-            .filter(entity::credit_purchases::Column::LocalUserId.eq(local_user_id))
+            .filter(entity::credit_purchases::Column::UserId.eq(user_id))
             .filter(entity::credit_purchases::Column::RevokedAt.is_null())
             .order_by_asc(entity::credit_purchases::Column::PurchaseDate)
             .all(&self.db)
@@ -124,8 +124,8 @@ impl CreditsService {
 
     /// Calculate total extra credits for a user
     #[instrument(skip(self))]
-    pub async fn calculate_total_extra_credits(&self, local_user_id: &str) -> Result<i32> {
-        let purchases = self.get_user_purchases(local_user_id).await?;
+    pub async fn calculate_total_extra_credits(&self, user_id: Uuid) -> Result<i32> {
+        let purchases = self.get_user_purchases(user_id).await?;
         let total: i32 = purchases.iter().map(|p| p.remaining()).sum();
         Ok(total)
     }
@@ -134,12 +134,12 @@ impl CreditsService {
     /// This is the CRITICAL method that makes purchased credits usable by QuotaService
     async fn recalculate_extra_credits_txn(
         &self,
-        local_user_id: &str,
+        user_id: Uuid,
         txn: &DatabaseTransaction,
     ) -> Result<i32> {
         // Calculate total remaining from purchases
         let purchases = entity::credit_purchases::Entity::find()
-            .filter(entity::credit_purchases::Column::LocalUserId.eq(local_user_id))
+            .filter(entity::credit_purchases::Column::UserId.eq(user_id))
             .filter(entity::credit_purchases::Column::RevokedAt.is_null())
             .all(txn)
             .await?;
@@ -156,7 +156,7 @@ impl CreditsService {
         // QuotaService creates the balance on first quota check with proper tier information.
         // This ensures users don't lose subscription credits regardless of first touchpoint.
         let balance = entity::user_credit_balance::Entity::find()
-            .filter(entity::user_credit_balance::Column::PurchaseIdentity.eq(local_user_id))
+            .filter(entity::user_credit_balance::Column::UserId.eq(user_id))
             .one(txn)
             .await?;
 
@@ -174,7 +174,7 @@ impl CreditsService {
         // (but QuotaService no longer reads from here)
         let today = now.date();
         let quota_usage = entity::quota_usage::Entity::find()
-            .filter(entity::quota_usage::Column::PurchaseIdentity.eq(local_user_id))
+            .filter(entity::quota_usage::Column::UserId.eq(user_id))
             .filter(entity::quota_usage::Column::UsageDate.eq(today))
             .one(txn)
             .await?;
@@ -188,7 +188,7 @@ impl CreditsService {
         } else {
             let new_quota = entity::quota_usage::ActiveModel {
                 id: Set(Uuid::new_v4()),
-                purchase_identity: Set(local_user_id.to_string()),
+                user_id: Set(user_id),
                 usage_date: Set(today),
                 text_count: Set(0),
                 image_count: Set(0),
@@ -204,7 +204,7 @@ impl CreditsService {
             entity::quota_usage::Entity::insert(new_quota)
                 .on_conflict(
                     OnConflict::columns([
-                        entity::quota_usage::Column::PurchaseIdentity,
+                        entity::quota_usage::Column::UserId,
                         entity::quota_usage::Column::UsageDate,
                     ])
                     .update_columns([
@@ -228,7 +228,7 @@ impl CreditsService {
     #[instrument(skip(self))]
     pub async fn consume_credits(
         &self,
-        local_user_id: &str,
+        user_id: Uuid,
         amount: i32,
     ) -> Result<ConsumedCreditsBreakdown> {
         let txn = self.db.begin().await?;
@@ -241,7 +241,7 @@ impl CreditsService {
 
         // 1. FIRST: Consume from subscription credits (they expire monthly)
         let quota = entity::quota_usage::Entity::find()
-            .filter(entity::quota_usage::Column::PurchaseIdentity.eq(local_user_id))
+            .filter(entity::quota_usage::Column::UserId.eq(user_id))
             .filter(entity::quota_usage::Column::UsageDate.eq(today))
             .lock_exclusive()
             .one(&txn)
@@ -265,7 +265,7 @@ impl CreditsService {
         // 2. SECOND: If subscription exhausted, consume from extra credits (FIFO by purchase_date)
         if remaining > 0 {
             let purchases = entity::credit_purchases::Entity::find()
-                .filter(entity::credit_purchases::Column::LocalUserId.eq(local_user_id))
+                .filter(entity::credit_purchases::Column::UserId.eq(user_id))
                 .filter(entity::credit_purchases::Column::RevokedAt.is_null())
                 .order_by_asc(entity::credit_purchases::Column::PurchaseDate)
                 .lock_exclusive()
@@ -307,14 +307,14 @@ impl CreditsService {
         }
 
         // 4. Recalculate total extra credits
-        self.recalculate_extra_credits_txn(local_user_id, &txn)
+        self.recalculate_extra_credits_txn(user_id, &txn)
             .await?;
 
         txn.commit().await?;
 
         info!(
-            "Consumed {} credits: {} from subscription, {} from extra",
-            amount, consumed_from_subscription, consumed_from_extra
+            "Consumed {} credits for user {}: {} from subscription, {} from extra",
+            amount, user_id, consumed_from_subscription, consumed_from_extra
         );
 
         Ok(ConsumedCreditsBreakdown {
@@ -329,12 +329,12 @@ impl CreditsService {
     #[instrument(skip(self))]
     pub async fn check_sufficient_credits(
         &self,
-        local_user_id: &str,
+        user_id: Uuid,
         required: i32,
     ) -> Result<bool> {
         // Read from user_credit_balance (accurate balance)
         let balance = entity::user_credit_balance::Entity::find()
-            .filter(entity::user_credit_balance::Column::PurchaseIdentity.eq(local_user_id))
+            .filter(entity::user_credit_balance::Column::UserId.eq(user_id))
             .one(&self.db)
             .await?;
 
@@ -350,11 +350,11 @@ impl CreditsService {
     /// Get complete credits quota information
     /// CRITICAL FIX: Now reads from user_credit_balance instead of quota_usage
     #[instrument(skip(self))]
-    pub async fn get_credits_quota(&self, local_user_id: &str) -> Result<CreditsQuotaInfo> {
+    pub async fn get_credits_quota(&self, user_id: Uuid) -> Result<CreditsQuotaInfo> {
         // CRITICAL FIX: Read from user_credit_balance (where QuotaService updates balances)
         // NOT from quota_usage (which is only used for daily analytics now)
         let balance = entity::user_credit_balance::Entity::find()
-            .filter(entity::user_credit_balance::Column::PurchaseIdentity.eq(local_user_id))
+            .filter(entity::user_credit_balance::Column::UserId.eq(user_id))
             .one(&self.db)
             .await?
             .unwrap_or_else(|| {
@@ -362,7 +362,7 @@ impl CreditsService {
                 let now = time::OffsetDateTime::now_utc();
                 entity::user_credit_balance::Model {
                     id: Uuid::new_v4(),
-                    purchase_identity: local_user_id.to_string(),
+                    user_id,
                     subscription_credits: 0,
                     subscription_monthly_allocation: 0,
                     subscription_resets_at: None,
@@ -373,7 +373,7 @@ impl CreditsService {
             });
 
         // Get all purchases for detailed breakdown
-        let purchases = self.get_user_purchases(local_user_id).await?;
+        let purchases = self.get_user_purchases(user_id).await?;
         let purchase_records: Vec<CreditPurchaseRecord> = purchases
             .iter()
             .map(|p| CreditPurchaseRecord {

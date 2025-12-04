@@ -8,6 +8,7 @@ pub struct Config {
     pub redis: RedisConfig,
     pub ai: AIConfig,
     pub iap: IAPConfig,
+    pub auth: AuthConfig,
     pub application: ApplicationConfig,
     pub quota: QuotaConfig,
 }
@@ -45,6 +46,17 @@ pub struct IAPConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct AuthConfig {
+    pub jwt_secret: String,
+    #[serde(default = "default_access_token_expiration_minutes")]
+    pub access_token_expiration_minutes: u64,
+    #[serde(default = "default_refresh_token_expiration_days")]
+    pub refresh_token_expiration_days: u64,
+    pub apple_client_id: String,  // Apple Sign In client ID (bundle ID)
+    pub apple_team_id: String,     // Apple developer team ID
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct ApplicationConfig {
     pub base_url: String,
 }
@@ -73,6 +85,14 @@ fn default_port() -> u16 {
 
 fn default_apple_environment() -> String {
     "sandbox".to_string()
+}
+
+fn default_access_token_expiration_minutes() -> u64 {
+    15 // 15 minutes (short-lived)
+}
+
+fn default_refresh_token_expiration_days() -> u64 {
+    7 // 7 days
 }
 
 fn default_free_text_limit() -> i32 {
@@ -122,6 +142,22 @@ impl Config {
                 "iap.google_service_account_key_path",
                 env::var("GOOGLE_SERVICE_ACCOUNT_KEY_PATH").ok(),
             )?
+            // Auth
+            .set_override_option("auth.jwt_secret", env::var("JWT_SECRET").ok())?
+            .set_override_option(
+                "auth.access_token_expiration_minutes",
+                env::var("ACCESS_TOKEN_EXPIRATION_MINUTES")
+                    .ok()
+                    .and_then(|v| v.parse::<u64>().ok()),
+            )?
+            .set_override_option(
+                "auth.refresh_token_expiration_days",
+                env::var("REFRESH_TOKEN_EXPIRATION_DAYS")
+                    .ok()
+                    .and_then(|v| v.parse::<u64>().ok()),
+            )?
+            .set_override_option("auth.apple_client_id", env::var("APPLE_CLIENT_ID").ok())?
+            .set_override_option("auth.apple_team_id", env::var("APPLE_TEAM_ID").ok())?
             // Application
             .set_override_option("application.base_url", env::var("BASE_URL").ok())?
             // Quota

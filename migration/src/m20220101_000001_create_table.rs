@@ -185,6 +185,68 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
+        // Create refresh_tokens table
+        manager
+            .create_table(
+                Table::create()
+                    .table(RefreshTokens::Table)
+                    .if_not_exists()
+                    .col(pk_uuid(RefreshTokens::Id))
+                    .col(uuid(RefreshTokens::UserId).not_null())
+                    .col(string(RefreshTokens::TokenHash).not_null().unique_key())
+                    .col(timestamp_with_time_zone(RefreshTokens::ExpiresAt).not_null())
+                    .col(
+                        timestamp_with_time_zone(RefreshTokens::CreatedAt)
+                            .default(Expr::current_timestamp())
+                            .not_null(),
+                    )
+                    .col(timestamp_with_time_zone_null(RefreshTokens::LastUsedAt))
+                    .col(timestamp_with_time_zone_null(RefreshTokens::RevokedAt))
+                    .col(json_binary_null(RefreshTokens::DeviceInfo))
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_refresh_tokens_user_id")
+                            .from(RefreshTokens::Table, RefreshTokens::UserId)
+                            .to(Users::Table, Users::Id)
+                            .on_delete(ForeignKeyAction::Cascade),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        // Create index on user_id for refresh_tokens
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_refresh_tokens_user_id")
+                    .table(RefreshTokens::Table)
+                    .col(RefreshTokens::UserId)
+                    .to_owned(),
+            )
+            .await?;
+
+        // Create index on token_hash for fast lookup
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_refresh_tokens_token_hash")
+                    .table(RefreshTokens::Table)
+                    .col(RefreshTokens::TokenHash)
+                    .to_owned(),
+            )
+            .await?;
+
+        // Create index on expires_at for cleanup queries
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_refresh_tokens_expires_at")
+                    .table(RefreshTokens::Table)
+                    .col(RefreshTokens::ExpiresAt)
+                    .to_owned(),
+            )
+            .await?;
+
         // Create user_iap_receipts table
         manager
             .create_table(
@@ -438,6 +500,10 @@ impl MigrationTrait for Migration {
             .await?;
 
         manager
+            .drop_table(Table::drop().table(RefreshTokens::Table).to_owned())
+            .await?;
+
+        manager
             .drop_table(Table::drop().table(UserAuthMethods::Table).to_owned())
             .await?;
 
@@ -509,6 +575,19 @@ enum UserAuthMethods {
     ProviderMetadata,
     FirstLinkedAt,
     LastUsedAt,
+}
+
+#[derive(DeriveIden)]
+enum RefreshTokens {
+    Table,
+    Id,
+    UserId,
+    TokenHash,
+    ExpiresAt,
+    CreatedAt,
+    LastUsedAt,
+    RevokedAt,
+    DeviceInfo,
 }
 
 #[derive(DeriveIden)]

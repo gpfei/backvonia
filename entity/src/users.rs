@@ -29,6 +29,8 @@ pub enum Relation {
     IapReceiptCache,
     #[sea_orm(has_many = "super::quota_usage::Entity")]
     QuotaUsage,
+    #[sea_orm(has_many = "super::refresh_tokens::Entity")]
+    RefreshTokens,
     #[sea_orm(has_many = "super::user_auth_methods::Entity")]
     UserAuthMethods,
     #[sea_orm(has_one = "super::user_credit_balance::Entity")]
@@ -50,6 +52,12 @@ impl Related<super::iap_receipt_cache::Entity> for Entity {
 impl Related<super::quota_usage::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::QuotaUsage.def()
+    }
+}
+
+impl Related<super::refresh_tokens::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::RefreshTokens.def()
     }
 }
 
