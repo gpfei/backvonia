@@ -8,3 +8,4 @@ pub use super::user_auth_methods::Entity as UserAuthMethods;
 pub use super::user_credit_balance::Entity as UserCreditBalance;
 pub use super::user_iap_receipts::Entity as UserIapReceipts;
 pub use super::users::Entity as Users;
+pub use super::welcome_bonuses::Entity as WelcomeBonuses;

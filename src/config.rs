@@ -54,6 +54,8 @@ pub struct AuthConfig {
     pub refresh_token_expiration_days: u64,
     pub apple_client_id: String,  // Apple Sign In client ID (bundle ID)
     pub apple_team_id: String,     // Apple developer team ID
+    #[serde(default = "default_welcome_bonus_amount")]
+    pub welcome_bonus_amount: i32, // Welcome bonus credits for new users (default: 5)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -93,6 +95,10 @@ fn default_access_token_expiration_minutes() -> u64 {
 
 fn default_refresh_token_expiration_days() -> u64 {
     7 // 7 days
+}
+
+fn default_welcome_bonus_amount() -> i32 {
+    5 // 5 credits for new users
 }
 
 fn default_free_text_limit() -> i32 {
@@ -158,6 +164,12 @@ impl Config {
             )?
             .set_override_option("auth.apple_client_id", env::var("APPLE_CLIENT_ID").ok())?
             .set_override_option("auth.apple_team_id", env::var("APPLE_TEAM_ID").ok())?
+            .set_override_option(
+                "auth.welcome_bonus_amount",
+                env::var("WELCOME_BONUS_AMOUNT")
+                    .ok()
+                    .and_then(|v| v.parse::<i32>().ok()),
+            )?
             // Application
             .set_override_option("application.base_url", env::var("BASE_URL").ok())?
             // Quota

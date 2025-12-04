@@ -11,3 +11,4 @@ pub mod user_auth_methods;
 pub mod user_credit_balance;
 pub mod user_iap_receipts;
 pub mod users;
+pub mod welcome_bonuses;

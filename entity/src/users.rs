@@ -35,6 +35,8 @@ pub enum Relation {
     UserAuthMethods,
     #[sea_orm(has_one = "super::user_credit_balance::Entity")]
     UserCreditBalance,
+    #[sea_orm(has_one = "super::welcome_bonuses::Entity")]
+    WelcomeBonuses,
 }
 
 impl Related<super::credit_purchases::Entity> for Entity {
@@ -70,6 +72,12 @@ impl Related<super::user_auth_methods::Entity> for Entity {
 impl Related<super::user_credit_balance::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::UserCreditBalance.def()
+    }
+}
+
+impl Related<super::welcome_bonuses::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::WelcomeBonuses.def()
     }
 }
 

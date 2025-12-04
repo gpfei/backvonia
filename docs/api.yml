@@ -1,12 +1,21 @@
 openapi: 3.0.3
 info:
   title: Talevonia API
-  version: "1.0.0"
+  version: "2.0.0"
   description: |
     Backend API for Talevonia MVP – a branching, AI-assisted personal storytelling app.
-    Identity and quota are derived from IAP receipts (no user accounts).
 
-    Credit System:
+    **Authentication:**
+    - Users authenticate via Apple Sign In (Google Sign In coming soon)
+    - JWT-based authentication with short-lived access tokens (15 min) and long-lived refresh tokens (7 days)
+    - All protected endpoints require Authorization header with Bearer token
+
+    **User System:**
+    - Users have accounts with user_id (UUID) as primary identifier
+    - Account tiers: Free, Pro (determined by IAP subscriptions)
+    - Welcome bonus: New users receive 5 credits (configurable) on first login with unique device
+
+    **Credit System:**
     - Pro tier users receive 1000 subscription credits per month (expire monthly)
     - All users can purchase extra credits (100, 500, or 2000 packs) that never expire
     - Credits consumed in order: subscription first, then extra credits (FIFO by purchase date)
@@ -17,23 +26,172 @@ servers:
     description: Production
 
 tags:
+  - name: Auth
+    description: User authentication and account management
   - name: AI
     description: AI text and image generation
   - name: IAP
-    description: In-app purchase verification and quota
+    description: In-app purchase verification and credit management
 
 paths:
+  # =============================================================================
+  # Authentication
+  # =============================================================================
+  /auth/login/apple:
+    post:
+      tags: [Auth]
+      summary: Authenticate with Apple Sign In
+      operationId: appleSignIn
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppleSignInRequest'
+      responses:
+        '200':
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Invalid request or token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token using refresh token
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: Token refreshed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshTokenResponse'
+        '401':
+          description: Invalid or expired refresh token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout - revoke a specific refresh token
+      operationId: logout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+      responses:
+        '200':
+          description: Logged out successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutResponse'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/logout-all:
+    post:
+      tags: [Auth]
+      summary: Logout from all devices - revoke all refresh tokens
+      operationId: logoutAll
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Logged out from all devices
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutResponse'
+        '401':
+          description: Unauthorized - invalid or missing access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current user information
+      operationId: getMe
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User information retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '401':
+          description: Unauthorized - invalid or missing access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # =============================================================================
+  # AI Generation
+  # =============================================================================
   /ai/text/continue:
     post:
       tags: [AI]
       summary: Generate AI text continuation candidates
       operationId: aiTextContinue
+      security:
+        - BearerAuth: []
       parameters:
         - $ref: '#/components/parameters/XClientVersion'
         - $ref: '#/components/parameters/XPlatform'
         - $ref: '#/components/parameters/XDeviceId'
-        - $ref: '#/components/parameters/XIAPPlatform'
-        - $ref: '#/components/parameters/XIAPReceipt'
       requestBody:
         required: true
         content:
@@ -53,6 +211,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized - invalid or missing access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '429':
           description: Rate limited or quota exceeded
           content:
@@ -66,60 +230,66 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-/ai/text/edit:
-  post:
-    tags: [AI]
-    summary: Apply AI text editing or transformation to existing text
-    operationId: aiTextEdit
-    parameters:
-      - $ref: '#/components/parameters/XClientVersion'
-      - $ref: '#/components/parameters/XPlatform'
-      - $ref: '#/components/parameters/XDeviceId'
-      - $ref: '#/components/parameters/XIAPPlatform'
-      - $ref: '#/components/parameters/XIAPReceipt'
-    requestBody:
-      required: true
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/AITextEditRequest'
-    responses:
-      '200':
-        description: AI edit result candidates
+  /ai/text/edit:
+    post:
+      tags: [AI]
+      summary: Apply AI text editing or transformation to existing text
+      operationId: aiTextEdit
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XClientVersion'
+        - $ref: '#/components/parameters/XPlatform'
+        - $ref: '#/components/parameters/XDeviceId'
+      requestBody:
+        required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AITextEditResponse'
-      '400':
-        description: Invalid request
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ErrorResponse'
-      '429':
-        description: Rate limited or quota exceeded
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ErrorResponse'
-      '500':
-        description: Server error
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ErrorResponse'
+              $ref: '#/components/schemas/AITextEditRequest'
+      responses:
+        '200':
+          description: AI edit result candidates
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AITextEditResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized - invalid or missing access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limited or quota exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /ai/image/generate:
     post:
       tags: [AI]
       summary: Generate AI image for a story node
       operationId: aiImageGenerate
+      security:
+        - BearerAuth: []
       parameters:
         - $ref: '#/components/parameters/XClientVersion'
         - $ref: '#/components/parameters/XPlatform'
         - $ref: '#/components/parameters/XDeviceId'
-        - $ref: '#/components/parameters/XIAPPlatform'
-        - $ref: '#/components/parameters/XIAPReceipt'
       requestBody:
         required: true
         content:
@@ -139,6 +309,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized - invalid or missing access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '429':
           description: Rate limited or quota exceeded
           content:
@@ -152,11 +328,32 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /iap/verify:
+  # =============================================================================
+  # IAP & Credits
+  # =============================================================================
+  /iap/link:
     post:
       tags: [IAP]
-      summary: Verify IAP receipt and return purchase tier
-      operationId: iapVerify
+      summary: Verify and link IAP purchase to user account
+      operationId: linkIAP
+      description: |
+        Verifies the IAP receipt with Apple/Google, links it to the authenticated user's account,
+        and updates their account tier accordingly.
+
+        This endpoint handles:
+        - Receipt verification with Apple/Google
+        - Linking subscription/purchase to user account
+        - Updating user's account_tier (free → pro for subscriptions)
+        - Family sharing detection and handling
+
+        **Flow:**
+        1. User authenticates with Apple Sign In
+        2. User makes IAP purchase in app
+        3. Client calls this endpoint with receipt
+        4. Backend verifies receipt, links to user, updates tier
+        5. User now has Pro features activated
+      security:
+        - BearerAuth: []
       parameters:
         - $ref: '#/components/parameters/XClientVersion'
         - $ref: '#/components/parameters/XPlatform'
@@ -166,16 +363,22 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/IAPVerifyRequest'
+              $ref: '#/components/schemas/IAPLinkRequest'
       responses:
         '200':
-          description: IAP verification result
+          description: IAP verified and linked successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/IAPVerifyResponse'
+                $ref: '#/components/schemas/IAPLinkResponse'
         '400':
           description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized - must be logged in
           content:
             application/json:
               schema:
@@ -198,12 +401,12 @@ paths:
       tags: [IAP]
       summary: Get current credit balance and quota information
       operationId: getQuota
+      security:
+        - BearerAuth: []
       parameters:
         - $ref: '#/components/parameters/XClientVersion'
         - $ref: '#/components/parameters/XPlatform'
         - $ref: '#/components/parameters/XDeviceId'
-        - $ref: '#/components/parameters/XIAPPlatform'
-        - $ref: '#/components/parameters/XIAPReceipt'
       responses:
         '200':
           description: Credits and quota status
@@ -211,8 +414,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CreditsQuotaResponse'
-        '400':
-          description: Invalid request
+        '401':
+          description: Unauthorized - invalid or missing access token
           content:
             application/json:
               schema:
@@ -229,12 +432,12 @@ paths:
       tags: [IAP]
       summary: Record a credit purchase from IAP
       operationId: recordCreditPurchase
+      security:
+        - BearerAuth: []
       parameters:
         - $ref: '#/components/parameters/XClientVersion'
         - $ref: '#/components/parameters/XPlatform'
         - $ref: '#/components/parameters/XDeviceId'
-        - $ref: '#/components/parameters/XIAPPlatform'
-        - $ref: '#/components/parameters/XIAPReceipt'
       requestBody:
         required: true
         content:
@@ -254,6 +457,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized - invalid or missing access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '409':
           description: Duplicate transaction (already processed)
           content:
@@ -268,6 +477,13 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
 
 components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT access token obtained from /auth/login/apple or /auth/refresh
+
   parameters:
     XClientVersion:
       name: X-Client-Version
@@ -290,23 +506,155 @@ components:
       schema:
         type: string
       description: Anonymous, client-generated device ID (UUID)
-    XIAPPlatform:
-      name: X-IAP-Platform
-      in: header
-      required: false
-      schema:
-        type: string
-        enum: [apple, google]
-    XIAPReceipt:
-      name: X-IAP-Receipt
-      in: header
-      required: false
-      schema:
-        type: string
-      description: Base64-encoded IAP receipt
 
   schemas:
-    # Generic wrapper
+    # =============================================================================
+    # Authentication Schemas
+    # =============================================================================
+    AppleSignInRequest:
+      type: object
+      properties:
+        idToken:
+          type: string
+          description: Apple ID token (JWT from Apple Sign In)
+        fullName:
+          type: string
+          nullable: true
+          description: User's full name (only provided on first sign in)
+        deviceInfo:
+          $ref: '#/components/schemas/DeviceInfo'
+      required: [idToken]
+
+    DeviceInfo:
+      type: object
+      properties:
+        platform:
+          type: string
+          enum: [ios, ipados, macos]
+          description: Device platform
+        deviceId:
+          type: string
+          description: Unique device identifier
+        appVersion:
+          type: string
+          nullable: true
+          description: App version
+      required: [platform, deviceId]
+
+    AuthResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/AuthData'
+
+    AuthData:
+      type: object
+      properties:
+        accessToken:
+          type: string
+          description: Short-lived JWT access token (15 minutes)
+        refreshToken:
+          type: string
+          description: Long-lived refresh token (7 days)
+        expiresIn:
+          type: integer
+          description: Access token expiration in seconds
+          example: 900
+        user:
+          $ref: '#/components/schemas/UserResponse'
+        welcomeBonus:
+          $ref: '#/components/schemas/WelcomeBonusResponse'
+
+    UserResponse:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        email:
+          type: string
+          nullable: true
+          description: User email (may be Apple private relay)
+        fullName:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [active, banned, deleted, shadow_banned]
+        accountTier:
+          type: string
+          enum: [free, pro]
+        createdAt:
+          type: string
+          format: date-time
+
+    WelcomeBonusResponse:
+      type: object
+      nullable: true
+      description: Welcome bonus information (only present for new user sign-ins)
+      properties:
+        granted:
+          type: boolean
+          description: Whether welcome bonus was granted
+        amount:
+          type: integer
+          description: Amount of credits granted (0 if not granted)
+          example: 5
+
+    RefreshTokenRequest:
+      type: object
+      properties:
+        refreshToken:
+          type: string
+      required: [refreshToken]
+
+    RefreshTokenResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            accessToken:
+              type: string
+            expiresIn:
+              type: integer
+              example: 900
+
+    LogoutRequest:
+      type: object
+      properties:
+        refreshToken:
+          type: string
+      required: [refreshToken]
+
+    LogoutResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: "Logged out successfully"
+
+    MeResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/UserResponse'
+
+    # =============================================================================
+    # Generic Schemas
+    # =============================================================================
     SuccessWrapper:
       type: object
       properties:
@@ -315,6 +663,7 @@ components:
           example: true
         data:
           type: object
+
     ErrorResponse:
       type: object
       properties:
@@ -323,6 +672,7 @@ components:
           example: false
         error:
           $ref: '#/components/schemas/ErrorObject'
+
     ErrorObject:
       type: object
       properties:
@@ -335,55 +685,181 @@ components:
           type: object
           additionalProperties: true
 
-    # Credits
+    # =============================================================================
+    # Credits & IAP Schemas
+    # =============================================================================
+    IAPLinkRequest:
+      type: object
+      properties:
+        platform:
+          type: string
+          enum: [apple, google]
+        receipt:
+          type: string
+          description: Base64-encoded receipt
+      required: [platform, receipt]
+
+    IAPLinkResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            accountTier:
+              type: string
+              enum: [free, pro]
+            productId:
+              type: string
+              nullable: true
+            validUntil:
+              type: string
+              format: date-time
+              nullable: true
+
+    CreditsQuotaResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            accountTier:
+              type: string
+              enum: [free, pro]
+            subscriptionCredits:
+              $ref: '#/components/schemas/SubscriptionCreditsInfo'
+            extraCredits:
+              $ref: '#/components/schemas/ExtraCreditsInfo'
+            totalCredits:
+              type: integer
+              description: Total remaining credits (subscription + extra)
+              example: 750
+
     SubscriptionCreditsInfo:
       type: object
+      description: Subscription credits that expire monthly (Pro tier only)
       properties:
         current:
           type: integer
-          description: Current subscription credits available
+          description: Remaining subscription credits for current period
+          example: 250
         monthlyAllocation:
           type: integer
-          description: Total monthly allocation for Pro tier
+          description: Monthly subscription credit allocation
+          example: 1000
         resetsAt:
           type: string
           format: date-time
           nullable: true
-          description: When subscription credits will reset
+          description: When subscription credits will reset (ISO 8601)
+          example: "2025-01-01T00:00:00Z"
+
+    ExtraCreditsInfo:
+      type: object
+      description: Extra purchased credits that never expire
+      properties:
+        total:
+          type: integer
+          description: Total extra credits remaining
+          example: 500
+        purchases:
+          type: array
+          description: Breakdown of individual credit purchases
+          items:
+            $ref: '#/components/schemas/CreditPurchaseRecord'
 
     CreditPurchaseRecord:
+      type: object
+      description: Individual credit purchase record
+      properties:
+        transactionId:
+          type: string
+          example: "1000000123456789"
+        productId:
+          type: string
+          example: "com.talevonia.credits_500"
+        amount:
+          type: integer
+          description: Original credit amount purchased
+          example: 500
+        consumed:
+          type: integer
+          description: Credits consumed from this purchase
+          example: 50
+        remaining:
+          type: integer
+          description: Credits remaining from this purchase
+          example: 450
+        purchaseDate:
+          type: string
+          format: date-time
+          description: When this purchase was made (ISO 8601)
+          example: "2024-12-01T10:30:00Z"
+
+    CreditPurchaseRequest:
       type: object
       properties:
         transactionId:
           type: string
+          description: Unique IAP transaction ID (idempotency key)
+        originalTransactionId:
+          type: string
+          nullable: true
+          description: Original transaction ID (for subscription renewals)
         productId:
           type: string
-        amount:
-          type: integer
-          description: Original credit amount purchased
-        consumed:
-          type: integer
-          description: Credits already consumed from this purchase
-        remaining:
-          type: integer
-          description: Credits still available from this purchase
+          description: Product ID (e.g., com.talevonia.credits.500)
         purchaseDate:
           type: string
           format: date-time
+          description: Purchase timestamp from IAP receipt
+        receipt:
+          type: string
+          nullable: true
+          description: Base64-encoded receipt (optional)
+      required: [transactionId, productId, purchaseDate]
 
-    ExtraCreditsInfo:
+    CreditPurchaseResponse:
       type: object
       properties:
-        total:
-          type: integer
-          description: Total extra credits available (sum of all purchase remainings)
-        purchases:
-          type: array
-          description: Individual credit purchases (FIFO order)
-          items:
-            $ref: '#/components/schemas/CreditPurchaseRecord'
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            creditsAdded:
+              type: integer
+              description: Credits added from this purchase
+            totalExtraCredits:
+              type: integer
+              description: Total extra credits after purchase
+            purchaseId:
+              type: string
+              format: uuid
+              description: Internal purchase record ID
+            quota:
+              $ref: '#/components/schemas/CreditsQuotaInfo'
 
-    # AI Text Continue
+    CreditsQuotaInfo:
+      type: object
+      properties:
+        subscriptionCredits:
+          $ref: '#/components/schemas/SubscriptionCreditsInfo'
+        extraCredits:
+          $ref: '#/components/schemas/ExtraCreditsInfo'
+        totalCredits:
+          type: integer
+          description: Total available credits
+
+    # =============================================================================
+    # AI Schemas
+    # =============================================================================
     AITextContinueRequest:
       type: object
       properties:
@@ -551,7 +1027,6 @@ components:
               items:
                 $ref: '#/components/schemas/AITextEditCandidate'
 
-    # AI Image Generate
     AIImageGenerateRequest:
       type: object
       properties:
@@ -612,195 +1087,3 @@ components:
           properties:
             image:
               $ref: '#/components/schemas/GeneratedImage'
-
-    # IAP Verify
-    IAPVerifyRequest:
-      type: object
-      properties:
-        platform:
-          type: string
-          enum: [apple, google]
-        receipt:
-          type: string
-          description: Base64-encoded receipt
-        app_version:
-          type: string
-        device_id:
-          type: string
-      required: [platform, receipt]
-
-    IAPVerifyResponse:
-      type: object
-      properties:
-        success:
-          type: boolean
-          example: true
-        data:
-          type: object
-          properties:
-            purchase_tier:
-              type: string
-              enum: [free, pro]
-            purchase_identity:
-              type: string
-              description: original_transaction_id or equivalent
-            product_id:
-              type: string
-            valid_until:
-              type: string
-              format: date-time
-              nullable: true
-            platform:
-              type: string
-              enum: [apple, google]
-
-    # Credits Quota Response
-    CreditsQuotaResponse:
-      type: object
-      properties:
-        success:
-          type: boolean
-          example: true
-        data:
-          type: object
-          properties:
-            purchaseTier:
-              type: string
-              enum: [free, pro]
-            subscriptionCredits:
-              $ref: '#/components/schemas/SubscriptionCreditsInfo'
-            extraCredits:
-              $ref: '#/components/schemas/ExtraCreditsInfo'
-            totalCredits:
-              type: integer
-              description: Total remaining credits (subscription + extra)
-              example: 750
-
-    SubscriptionCreditsInfo:
-      type: object
-      description: Subscription credits that expire monthly
-      properties:
-        current:
-          type: integer
-          description: Remaining subscription credits for current period
-          example: 250
-        monthlyAllocation:
-          type: integer
-          description: Monthly subscription credit allocation
-          example: 1000
-        resetsAt:
-          type: string
-          format: date-time
-          nullable: true
-          description: When subscription credits will reset (ISO 8601)
-          example: "2025-01-01T00:00:00Z"
-
-    ExtraCreditsInfo:
-      type: object
-      description: Extra purchased credits that never expire
-      properties:
-        total:
-          type: integer
-          description: Total extra credits remaining
-          example: 500
-        purchases:
-          type: array
-          description: Breakdown of individual credit purchases
-          items:
-            $ref: '#/components/schemas/CreditPurchaseRecord'
-
-    CreditPurchaseRecord:
-      type: object
-      description: Individual credit purchase record
-      properties:
-        transactionId:
-          type: string
-          example: "1000000123456789"
-        productId:
-          type: string
-          example: "com.talevonia.credits_500"
-        amount:
-          type: integer
-          description: Original credit amount purchased
-          example: 500
-        consumed:
-          type: integer
-          description: Credits consumed from this purchase
-          example: 50
-        remaining:
-          type: integer
-          description: Credits remaining from this purchase
-          example: 450
-        purchaseDate:
-          type: string
-          format: date-time
-          description: When this purchase was made (ISO 8601)
-          example: "2024-12-01T10:30:00Z"
-
-    # Legacy Quota (deprecated, kept for backward compatibility)
-    Quota:
-      type: object
-      deprecated: true
-      description: Deprecated - use CreditsQuotaResponse structure instead
-      properties:
-        totalCreditsRemaining:
-          type: integer
-          description: Total remaining credits (subscription + extra)
-          example: 700
-
-    # Credit Purchase Request/Response
-    CreditPurchaseRequest:
-      type: object
-      properties:
-        transactionId:
-          type: string
-          description: Unique IAP transaction ID (idempotency key)
-        originalTransactionId:
-          type: string
-          nullable: true
-          description: Original transaction ID (for subscription renewals)
-        productId:
-          type: string
-          description: Product ID (e.g., com.talevonia.tale.credits.500)
-        purchaseDate:
-          type: string
-          format: date-time
-          description: Purchase timestamp from IAP receipt
-        receipt:
-          type: string
-          nullable: true
-          description: Base64-encoded receipt (optional)
-      required: [transactionId, productId, purchaseDate]
-
-    CreditPurchaseResponse:
-      type: object
-      properties:
-        success:
-          type: boolean
-          example: true
-        data:
-          type: object
-          properties:
-            creditsAdded:
-              type: integer
-              description: Credits added from this purchase
-            totalExtraCredits:
-              type: integer
-              description: Total extra credits after purchase
-            purchaseId:
-              type: string
-              format: uuid
-              description: Internal purchase record ID
-            quota:
-              $ref: '#/components/schemas/CreditsQuotaInfo'
-
-    CreditsQuotaInfo:
-      type: object
-      properties:
-        subscriptionCredits:
-          $ref: '#/components/schemas/SubscriptionCreditsInfo'
-        extraCredits:
-          $ref: '#/components/schemas/ExtraCreditsInfo'
-        totalCredits:
-          type: integer
-          description: Total available credits

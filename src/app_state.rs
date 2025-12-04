@@ -2,7 +2,7 @@ use crate::{
     config::Config,
     services::{
         AIService, AuthService, CreditsService, IAPService, JWTService, QuotaService,
-        RefreshTokenService,
+        RefreshTokenService, WelcomeBonusService,
     },
 };
 use sea_orm::DatabaseConnection;
@@ -18,6 +18,7 @@ pub struct AppState {
     pub credits_service: Arc<CreditsService>,
     pub jwt_service: Arc<JWTService>,
     pub refresh_token_service: Arc<RefreshTokenService>,
+    pub welcome_bonus_service: Arc<WelcomeBonusService>,
     pub auth_service: Arc<AuthService>,
     pub config: Arc<Config>,
 }
@@ -46,10 +47,13 @@ impl AppState {
             db.clone(),
             auth_config_arc.clone(),
         ));
+        let welcome_bonus_service = Arc::new(WelcomeBonusService::new(db.clone()));
         let auth_service = Arc::new(AuthService::new(
             db.clone(),
             jwt_service.clone(),
             refresh_token_service.clone(),
+            welcome_bonus_service.clone(),
+            auth_config_arc.clone(),
         ));
 
         Ok(Self {
@@ -61,6 +65,7 @@ impl AppState {
             credits_service,
             jwt_service,
             refresh_token_service,
+            welcome_bonus_service,
             auth_service,
             config: config_arc,
         })

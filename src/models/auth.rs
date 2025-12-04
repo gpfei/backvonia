@@ -61,6 +61,8 @@ pub struct AuthData {
     pub refresh_token: String,
     pub expires_in: u64,  // Access token expiration in seconds
     pub user: UserResponse,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub welcome_bonus: Option<WelcomeBonusResponse>,
 }
 
 /// User information in responses
@@ -74,6 +76,14 @@ pub struct UserResponse {
     pub account_tier: AccountTier,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
+}
+
+/// Welcome bonus information in auth response
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct WelcomeBonusResponse {
+    pub granted: bool,
+    pub amount: i32,
 }
 
 /// Response from token refresh
@@ -140,6 +150,15 @@ impl From<crate::services::auth_service::UserInfo> for UserResponse {
             status: user_info.status,
             account_tier: user_info.account_tier,
             created_at: user_info.created_at,
+        }
+    }
+}
+
+impl From<crate::services::auth_service::WelcomeBonusInfo> for WelcomeBonusResponse {
+    fn from(bonus_info: crate::services::auth_service::WelcomeBonusInfo) -> Self {
+        Self {
+            granted: bonus_info.granted,
+            amount: bonus_info.amount,
         }
     }
 }

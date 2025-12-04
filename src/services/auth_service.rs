@@ -1,17 +1,21 @@
 use crate::{
+    config::AuthConfig,
     error::{ApiError, Result},
-    services::{jwt_service::JWTService, refresh_token_service::{DeviceInfo, RefreshTokenService}},
+    services::{
+        jwt_service::JWTService,
+        refresh_token_service::{DeviceInfo, RefreshTokenService},
+        welcome_bonus_service::WelcomeBonusService,
+    },
 };
 use entity::{
     sea_orm_active_enums::{AccountTier, UserStatus},
     user_auth_methods, users,
 };
-use sea_orm::{
-    entity::*, query::*, sea_query::Expr, ActiveValue::Set, DatabaseConnection,
-};
+use sea_orm::{entity::*, query::*, sea_query::Expr, ActiveValue::Set, DatabaseConnection};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use time::OffsetDateTime;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 /// Apple ID token payload (subset of claims we care about)
@@ -36,6 +40,13 @@ pub struct UserInfo {
     pub created_at: OffsetDateTime,
 }
 
+/// Welcome bonus information
+#[derive(Debug, Serialize, Clone)]
+pub struct WelcomeBonusInfo {
+    pub granted: bool,
+    pub amount: i32,
+}
+
 /// Authentication response with both tokens
 #[derive(Debug, Serialize)]
 pub struct AuthTokens {
@@ -43,12 +54,15 @@ pub struct AuthTokens {
     pub refresh_token: String,
     pub expires_in: u64,  // Access token expiration in seconds
     pub user: UserInfo,
+    pub welcome_bonus: Option<WelcomeBonusInfo>,
 }
 
 pub struct AuthService {
     db: DatabaseConnection,
     jwt_service: Arc<JWTService>,
     refresh_token_service: Arc<RefreshTokenService>,
+    welcome_bonus_service: Arc<WelcomeBonusService>,
+    config: Arc<AuthConfig>,
 }
 
 impl AuthService {
@@ -56,11 +70,15 @@ impl AuthService {
         db: DatabaseConnection,
         jwt_service: Arc<JWTService>,
         refresh_token_service: Arc<RefreshTokenService>,
+        welcome_bonus_service: Arc<WelcomeBonusService>,
+        config: Arc<AuthConfig>,
     ) -> Self {
         Self {
             db,
             jwt_service,
             refresh_token_service,
+            welcome_bonus_service,
+            config,
         }
     }
 
@@ -70,8 +88,9 @@ impl AuthService {
     /// 1. Verifies the Apple ID token (in production, would validate JWT signature with Apple's JWKS)
     /// 2. Extracts the 'sub' (Apple's unique user ID)
     /// 3. Finds or creates user and auth_method records
-    /// 4. Generates access token (15 min) and refresh token (7 days)
-    /// 5. Returns AuthTokens with both tokens and user info
+    /// 4. Grants welcome bonus if eligible (new user + device_id provided)
+    /// 5. Generates access token (15 min) and refresh token (7 days)
+    /// 6. Returns AuthTokens with both tokens, user info, and welcome bonus status
     pub async fn authenticate_with_apple(
         &self,
         id_token: &str,
@@ -88,9 +107,79 @@ impl AuthService {
         let apple_payload = self.parse_apple_id_token(id_token)?;
 
         // Find or create user
-        let (user, _is_new_user) = self
+        let (user, is_new_user) = self
             .find_or_create_user_by_apple(&apple_payload, full_name)
             .await?;
+
+        // Check and grant welcome bonus for new users
+        let mut welcome_bonus = None;
+        if is_new_user {
+            if let Some(ref device) = device_info {
+                // Check eligibility
+                let is_eligible = self
+                    .welcome_bonus_service
+                    .check_eligibility(&device.device_id, "apple", &apple_payload.sub)
+                    .await?;
+
+                if is_eligible {
+                    // Grant bonus
+                    let bonus_amount = self.config.welcome_bonus_amount;
+                    match self
+                        .welcome_bonus_service
+                        .grant_bonus(
+                            user.id,
+                            &device.device_id,
+                            "apple",
+                            &apple_payload.sub,
+                            bonus_amount,
+                        )
+                        .await
+                    {
+                        Ok(_) => {
+                            info!(
+                                user_id = %user.id,
+                                amount = bonus_amount,
+                                "Welcome bonus granted successfully"
+                            );
+                            welcome_bonus = Some(WelcomeBonusInfo {
+                                granted: true,
+                                amount: bonus_amount,
+                            });
+                        }
+                        Err(e) => {
+                            warn!(
+                                user_id = %user.id,
+                                error = %e,
+                                "Failed to grant welcome bonus"
+                            );
+                            // Continue with auth flow even if bonus fails
+                            welcome_bonus = Some(WelcomeBonusInfo {
+                                granted: false,
+                                amount: 0,
+                            });
+                        }
+                    }
+                } else {
+                    info!(
+                        user_id = %user.id,
+                        "Welcome bonus not granted: eligibility check failed"
+                    );
+                    welcome_bonus = Some(WelcomeBonusInfo {
+                        granted: false,
+                        amount: 0,
+                    });
+                }
+            } else {
+                info!(
+                    user_id = %user.id,
+                    "Welcome bonus not granted: device_id not provided"
+                );
+                welcome_bonus = Some(WelcomeBonusInfo {
+                    granted: false,
+                    amount: 0,
+                });
+            }
+        }
 
         // Generate access token (short-lived, 15 min)
         let access_token = self
@@ -106,7 +195,7 @@ impl AuthService {
         // Update last_login_at
         self.update_last_login(user.id).await?;
 
-        // Return tokens + user info
+        // Return tokens + user info + welcome bonus status
         let user_info = UserInfo {
             user_id: user.id,
             email: user.email.clone(),
@@ -121,6 +210,7 @@ impl AuthService {
             refresh_token,
             expires_in: 900,  // 15 minutes in seconds
             user: user_info,
+            welcome_bonus,
         })
     }
 

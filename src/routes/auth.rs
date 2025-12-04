@@ -43,10 +43,16 @@ use crate::{
 ///       "status": "active",
 ///       "accountTier": "free",
 ///       "createdAt": "2024-12-04T00:00:00Z"
+///     },
+///     "welcomeBonus": {
+///       "granted": true,
+///       "amount": 5
 ///     }
 ///   }
 /// }
 /// ```
+///
+/// Note: `welcomeBonus` is only present for new user sign-ins
 #[instrument(skip(state, request))]
 pub async fn apple_sign_in(
     State(state): State<AppState>,
@@ -68,6 +74,7 @@ pub async fn apple_sign_in(
             refresh_token: auth_tokens.refresh_token,
             expires_in: auth_tokens.expires_in,
             user: auth_tokens.user.into(),
+            welcome_bonus: auth_tokens.welcome_bonus.map(|b| b.into()),
         },
     }))
 }
