@@ -20,8 +20,6 @@ pub struct RateLimitConfig {
     pub free_tier_rpm: u32,
     /// Requests per minute for pro tier
     pub pro_tier_rpm: u32,
-    /// Requests per minute for enterprise tier
-    pub enterprise_tier_rpm: u32,
     /// Window size in seconds
     pub window_seconds: u32,
 }
@@ -29,9 +27,8 @@ pub struct RateLimitConfig {
 impl Default for RateLimitConfig {
     fn default() -> Self {
         Self {
-            free_tier_rpm: 60,       // 1 request per second
-            pro_tier_rpm: 600,       // 10 requests per second
-            enterprise_tier_rpm: 1200, // 20 requests per second
+            free_tier_rpm: 60,  // 1 request per second
+            pro_tier_rpm: 600,  // 10 requests per second
             window_seconds: 60,
         }
     }
@@ -65,7 +62,6 @@ pub fn rate_limit_middleware(
             let limit = match identity.account_tier {
                 AccountTier::Free => config.free_tier_rpm,
                 AccountTier::Pro => config.pro_tier_rpm,
-                AccountTier::Enterprise => config.enterprise_tier_rpm,
             };
 
             // Check rate limit using Redis (using user_id as the key)

@@ -39,9 +39,8 @@ impl QuotaService {
     /// Get monthly allocation for a tier
     fn get_monthly_allocation(&self, tier: &AccountTier) -> i32 {
         match tier {
-            AccountTier::Free => self.config.free_text_daily_limit,       // Treat as monthly for now
-            AccountTier::Pro => self.config.pro_text_daily_limit,         // Treat as monthly for now
-            AccountTier::Enterprise => self.config.pro_text_daily_limit * 2, // Double pro limits for enterprise
+            AccountTier::Free => self.config.free_text_daily_limit, // Treat as monthly for now
+            AccountTier::Pro => self.config.pro_text_daily_limit,   // Treat as monthly for now
         }
     }
 

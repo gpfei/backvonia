@@ -26,7 +26,7 @@ impl MigrationTrait for Migration {
             .create_type(
                 Type::create()
                     .as_enum(AccountTier::Type)
-                    .values([AccountTier::Free, AccountTier::Pro, AccountTier::Enterprise])
+                    .values([AccountTier::Free, AccountTier::Pro])
                     .to_owned(),
             )
             .await?;
@@ -546,7 +546,6 @@ enum AccountTier {
     Type,
     Free,
     Pro,
-    Enterprise,
 }
 
 // Table definitions

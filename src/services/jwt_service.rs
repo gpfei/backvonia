@@ -47,7 +47,6 @@ impl JWTService {
             tier: match account_tier {
                 AccountTier::Free => "free".to_string(),
                 AccountTier::Pro => "pro".to_string(),
-                AccountTier::Enterprise => "enterprise".to_string(),
             },
             iat: now,
             exp,
@@ -87,7 +86,6 @@ impl JWTService {
         match claims.tier.as_str() {
             "free" => Ok(AccountTier::Free),
             "pro" => Ok(AccountTier::Pro),
-            "enterprise" => Ok(AccountTier::Enterprise),
             _ => Err(crate::error::ApiError::InvalidToken(format!(
                 "Invalid account tier: {}",
                 claims.tier
@@ -146,7 +144,7 @@ mod tests {
         let service = JWTService::new(test_config());
         let user_id = Uuid::new_v4();
 
-        for tier in [AccountTier::Free, AccountTier::Pro, AccountTier::Enterprise] {
+        for tier in [AccountTier::Free, AccountTier::Pro] {
             let token = service.generate_token(user_id, tier.clone()).unwrap();
             let claims = service.validate_token(&token).unwrap();
             let extracted_tier = JWTService::account_tier_from_claims(&claims).unwrap();

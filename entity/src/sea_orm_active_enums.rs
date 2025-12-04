@@ -10,8 +10,6 @@ pub enum AccountTier {
     Free,
     #[sea_orm(string_value = "pro")]
     Pro,
-    #[sea_orm(string_value = "enterprise")]
-    Enterprise,
 }
 #[derive(Debug, Clone, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "Enum", enum_name = "user_status")]
