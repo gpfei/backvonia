@@ -4,7 +4,7 @@ use tracing::instrument;
 use crate::{
     app_state::AppState,
     error::{ApiError, Result},
-    middleware::IAPIdentity,
+    middleware::UserIdentity,
     models::{
         ai::{
             AIImageGenerateData, AIImageGenerateRequest, AIImageGenerateResponse,
@@ -19,7 +19,7 @@ use crate::{
 #[instrument(skip(state, identity, request))]
 pub async fn text_continue(
     State(state): State<AppState>,
-    identity: IAPIdentity,
+    identity: UserIdentity,
     Json(request): Json<AITextContinueRequest>,
 ) -> Result<Json<AITextContinueResponse>> {
     // Validate request
@@ -28,8 +28,7 @@ pub async fn text_continue(
         .validate()
         .map_err(|e| ApiError::BadRequest(format!("Validation error: {}", e)))?;
 
-    let purchase_identity = &identity.purchase_identity;
-    let tier = identity.purchase_tier;
+    let tier = identity.account_tier;
 
     // Determine operation based on mode
     let operation = match request.mode {
@@ -40,7 +39,7 @@ pub async fn text_continue(
     // Atomically check and increment quota with weighted cost
     state
         .quota_service
-        .check_and_increment_quota_weighted(&purchase_identity, tier, operation)
+        .check_and_increment_quota_weighted(identity.user_id, tier, operation)
         .await?;
 
     // Generate candidates
@@ -64,7 +63,7 @@ pub async fn text_continue(
 #[instrument(skip(state, identity, request))]
 pub async fn image_generate(
     State(state): State<AppState>,
-    identity: IAPIdentity,
+    identity: UserIdentity,
     Json(request): Json<AIImageGenerateRequest>,
 ) -> Result<Json<AIImageGenerateResponse>> {
     // Validate request
@@ -73,13 +72,12 @@ pub async fn image_generate(
         .validate()
         .map_err(|e| ApiError::BadRequest(format!("Validation error: {}", e)))?;
 
-    let purchase_identity = &identity.purchase_identity;
-    let tier = identity.purchase_tier;
+    let tier = identity.account_tier;
 
     // Atomically check and increment quota with weighted cost
     state
         .quota_service
-        .check_and_increment_quota_weighted(&purchase_identity, tier, AIOperation::ImageGenerate)
+        .check_and_increment_quota_weighted(identity.user_id, tier, AIOperation::ImageGenerate)
         .await?;
 
     // Generate image
@@ -98,7 +96,7 @@ pub async fn image_generate(
 #[instrument(skip(state, identity, request))]
 pub async fn text_edit(
     State(state): State<AppState>,
-    identity: IAPIdentity,
+    identity: UserIdentity,
     Json(request): Json<AITextEditRequest>,
 ) -> Result<Json<AITextEditResponse>> {
     // Validate request
@@ -107,8 +105,7 @@ pub async fn text_edit(
         .validate()
         .map_err(|e| ApiError::BadRequest(format!("Validation error: {}", e)))?;
 
-    let purchase_identity = &identity.purchase_identity;
-    let tier = identity.purchase_tier;
+    let tier = identity.account_tier;
 
     // Determine operation based on edit mode
     let operation = match request.mode {
@@ -121,7 +118,7 @@ pub async fn text_edit(
     // Atomically check and increment quota with weighted cost
     state
         .quota_service
-        .check_and_increment_quota_weighted(&purchase_identity, tier, operation)
+        .check_and_increment_quota_weighted(identity.user_id, tier, operation)
         .await?;
 
     // Generate edit candidates

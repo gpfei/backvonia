@@ -1,7 +1,8 @@
+use entity::sea_orm_active_enums::AccountTier;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
-use super::common::PurchaseTier;
+use super::common::IAPPlatform;
 
 /// Request to record a credit purchase
 #[derive(Debug, Deserialize, Validate)]
@@ -15,6 +16,8 @@ pub struct CreditPurchaseRequest {
 
     #[validate(length(min = 1, max = 100))]
     pub product_id: String,
+
+    pub platform: IAPPlatform,
 
     pub purchase_date: time::OffsetDateTime,
 
@@ -88,7 +91,7 @@ pub struct CreditsQuotaResponse {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreditsQuotaData {
-    pub purchase_tier: PurchaseTier,
+    pub account_tier: AccountTier,
     pub subscription_credits: SubscriptionCreditsInfo,
     pub extra_credits: ExtraCreditsInfo,
     pub total_credits: i32,

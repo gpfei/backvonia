@@ -1,11 +1,12 @@
 // Route modules
 pub mod ai;
+pub mod auth;
 pub mod credits;
 pub mod iap;
 
 use crate::{
     app_state::AppState,
-    middleware::{create_rate_limiter, iap_auth_middleware},
+    middleware::{create_rate_limiter, jwt_auth_middleware},
 };
 use axum::{
     middleware,
@@ -31,20 +32,26 @@ fn api_v1_routes(state: AppState) -> Router<AppState> {
         .route_layer(middleware::from_fn(rate_limiter))
         .layer(middleware::from_fn_with_state(
             state.clone(),
-            iap_auth_middleware,
+            jwt_auth_middleware,
         ));
 
-    // Auth-only routes (no rate limiting)
+    // Auth-only routes (no rate limiting, require JWT)
     let auth_only_routes = Router::new()
-        .route("/quota", get(credits::get_credits_quota)) // Returns credits-aware quota
+        .route("/quota", get(credits::get_credits_quota))
         .route("/credits/purchase", post(credits::record_credit_purchase))
+        .route("/auth/me", get(auth::get_me))
+        .route("/auth/logout-all", post(auth::logout_all))
         .layer(middleware::from_fn_with_state(
             state.clone(),
-            iap_auth_middleware,
+            jwt_auth_middleware,
         ));
 
     // Public routes (no authentication required)
-    let public_routes = Router::new().route("/iap/verify", post(iap::verify_iap));
+    let public_routes = Router::new()
+        .route("/auth/login/apple", post(auth::apple_sign_in))
+        .route("/auth/refresh", post(auth::refresh_token))
+        .route("/auth/logout", post(auth::logout))
+        .route("/iap/verify", post(iap::verify_iap));
 
     // Combine all routes
     Router::new()

@@ -1,6 +1,9 @@
 use crate::{
     config::Config,
-    services::{AIService, CreditsService, IAPService, QuotaService},
+    services::{
+        AIService, AuthService, CreditsService, IAPService, JWTService, QuotaService,
+        RefreshTokenService,
+    },
 };
 use sea_orm::DatabaseConnection;
 use std::sync::Arc;
@@ -13,6 +16,9 @@ pub struct AppState {
     pub iap_service: Arc<IAPService>,
     pub quota_service: Arc<QuotaService>,
     pub credits_service: Arc<CreditsService>,
+    pub jwt_service: Arc<JWTService>,
+    pub refresh_token_service: Arc<RefreshTokenService>,
+    pub auth_service: Arc<AuthService>,
     pub config: Arc<Config>,
 }
 
@@ -24,11 +30,27 @@ impl AppState {
         // Connect to Redis
         let redis = Arc::new(redis::Client::open(config.redis.url.as_str())?);
 
+        // Wrap config in Arc for sharing
+        let config_arc = Arc::new(config);
+
         // Initialize services
-        let ai_service = Arc::new(AIService::new(&config.ai));
-        let iap_service = Arc::new(IAPService::new(&config.iap));
-        let quota_service = Arc::new(QuotaService::new(db.clone(), &config.quota));
+        let ai_service = Arc::new(AIService::new(&config_arc.ai));
+        let iap_service = Arc::new(IAPService::new(&config_arc.iap));
+        let quota_service = Arc::new(QuotaService::new(db.clone(), &config_arc.quota));
         let credits_service = Arc::new(CreditsService::new(db.clone()));
+
+        // Initialize authentication services
+        let auth_config_arc = Arc::new(config_arc.auth.clone());
+        let jwt_service = Arc::new(JWTService::new(auth_config_arc.clone()));
+        let refresh_token_service = Arc::new(RefreshTokenService::new(
+            db.clone(),
+            auth_config_arc.clone(),
+        ));
+        let auth_service = Arc::new(AuthService::new(
+            db.clone(),
+            jwt_service.clone(),
+            refresh_token_service.clone(),
+        ));
 
         Ok(Self {
             db,
@@ -37,7 +59,10 @@ impl AppState {
             iap_service,
             quota_service,
             credits_service,
-            config: Arc::new(config),
+            jwt_service,
+            refresh_token_service,
+            auth_service,
+            config: config_arc,
         })
     }
 }

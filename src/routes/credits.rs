@@ -5,7 +5,7 @@ use validator::Validate;
 use crate::{
     app_state::AppState,
     error::{ApiError, Result},
-    middleware::IAPIdentity,
+    middleware::UserIdentity,
     models::credits::{
         CreditPurchaseData, CreditPurchaseRequest, CreditPurchaseResponse, CreditsQuotaData,
         CreditsQuotaResponse,
@@ -16,7 +16,7 @@ use crate::{
 #[instrument(skip(state, request))]
 pub async fn record_credit_purchase(
     State(state): State<AppState>,
-    identity: IAPIdentity,
+    identity: UserIdentity,
     Json(request): Json<CreditPurchaseRequest>,
 ) -> Result<Json<CreditPurchaseResponse>> {
     // Validate request
@@ -33,11 +33,11 @@ pub async fn record_credit_purchase(
     let (purchase_id, total_extra) = state
         .credits_service
         .record_purchase(
-            &identity.purchase_identity,
+            identity.user_id,
             request.original_transaction_id.as_deref(),
             &request.transaction_id,
             &request.product_id,
-            identity.platform,
+            request.platform,
             amount,
             request.purchase_date,
             request.receipt.as_deref(),
@@ -47,7 +47,7 @@ pub async fn record_credit_purchase(
     // Get updated quota info
     let quota_info = state
         .credits_service
-        .get_credits_quota(&identity.purchase_identity)
+        .get_credits_quota(identity.user_id)
         .await?;
 
     Ok(Json(CreditPurchaseResponse {
@@ -65,18 +65,18 @@ pub async fn record_credit_purchase(
 #[instrument(skip(state, identity))]
 pub async fn get_credits_quota(
     State(state): State<AppState>,
-    identity: IAPIdentity,
+    identity: UserIdentity,
 ) -> Result<Json<CreditsQuotaResponse>> {
     // Get credits quota info
     let quota_info = state
         .credits_service
-        .get_credits_quota(&identity.purchase_identity)
+        .get_credits_quota(identity.user_id)
         .await?;
 
     Ok(Json(CreditsQuotaResponse {
         success: true,
         data: CreditsQuotaData {
-            purchase_tier: identity.purchase_tier,
+            account_tier: identity.account_tier,
             subscription_credits: quota_info.subscription_credits.clone(),
             extra_credits: quota_info.extra_credits.clone(),
             total_credits: quota_info.total_credits,
