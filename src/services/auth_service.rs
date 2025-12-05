@@ -309,7 +309,7 @@ impl AuthService {
 
         // New user - create user + auth_method records
         let now = OffsetDateTime::now_utc();
-        let user_id = Uuid::new_v4();
+        let user_id = Uuid::now_v7(); // Use UUID v7 for time-ordered IDs (better for DB indexing)
 
         // Create user
         let new_user = users::ActiveModel {
@@ -330,7 +330,7 @@ impl AuthService {
 
         // Create auth_method
         let new_auth_method = user_auth_methods::ActiveModel {
-            id: Set(Uuid::new_v4()),
+            id: Set(Uuid::now_v7()), // Use UUID v7 for better indexing
             user_id: Set(user_id),
             provider: Set("apple".to_string()),
             provider_user_id: Set(apple_payload.sub.clone()),

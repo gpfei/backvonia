@@ -331,11 +331,11 @@ paths:
   # =============================================================================
   # IAP & Credits
   # =============================================================================
-  /iap/link:
+  /iap/verify:
     post:
       tags: [IAP]
-      summary: Verify and link IAP purchase to user account
-      operationId: linkIAP
+      summary: Verify IAP purchase and update user account
+      operationId: verifyIAP
       description: |
         Verifies the IAP receipt with Apple/Google, links it to the authenticated user's account,
         and updates their account tier accordingly.
@@ -344,7 +344,8 @@ paths:
         - Receipt verification with Apple/Google
         - Linking subscription/purchase to user account
         - Updating user's account_tier (free → pro for subscriptions)
-        - Family sharing detection and handling
+        - Family sharing detection (is_family_shared flag)
+        - Subscription status tracking (active, expired, grace_period, billing_retry, cancelled)
 
         **Flow:**
         1. User authenticates with Apple Sign In
@@ -352,6 +353,8 @@ paths:
         3. Client calls this endpoint with receipt
         4. Backend verifies receipt, links to user, updates tier
         5. User now has Pro features activated
+
+        **Note:** Authentication is required. Users must login before making purchases.
       security:
         - BearerAuth: []
       parameters:

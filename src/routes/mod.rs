@@ -39,6 +39,7 @@ fn api_v1_routes(state: AppState) -> Router<AppState> {
     let auth_only_routes = Router::new()
         .route("/quota", get(credits::get_credits_quota))
         .route("/credits/purchase", post(credits::record_credit_purchase))
+        .route("/iap/verify", post(iap::verify_iap))
         .route("/auth/me", get(auth::get_me))
         .route("/auth/logout-all", post(auth::logout_all))
         .layer(middleware::from_fn_with_state(
@@ -50,8 +51,7 @@ fn api_v1_routes(state: AppState) -> Router<AppState> {
     let public_routes = Router::new()
         .route("/auth/login/apple", post(auth::apple_sign_in))
         .route("/auth/refresh", post(auth::refresh_token))
-        .route("/auth/logout", post(auth::logout))
-        .route("/iap/verify", post(iap::verify_iap));
+        .route("/auth/logout", post(auth::logout));
 
     // Combine all routes
     Router::new()

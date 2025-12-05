@@ -33,6 +33,16 @@ struct AppleTransaction {
     original_transaction_id: String,
     product_id: String,
     expires_date_ms: Option<String>,
+    #[serde(default)]
+    in_app_ownership_type: Option<String>, // "PURCHASED" or "FAMILY_SHARED"
+    #[serde(default)]
+    cancellation_date_ms: Option<String>,
+    #[serde(default)]
+    is_in_billing_retry_period: Option<String>, // "true" or "false"
+    #[serde(default)]
+    is_in_intro_offer_period: Option<String>,
+    #[serde(default)]
+    is_trial_period: Option<String>,
 }
 
 impl IAPService {
@@ -92,22 +102,42 @@ impl IAPService {
         }
 
         // Extract transaction info from latest_receipt_info or receipt
-        let (original_transaction_id, product_id, expires_date_ms) =
-            if let Some(transactions) = &apple_response.latest_receipt_info {
-                let transaction = transactions
-                    .first()
-                    .ok_or_else(|| ApiError::InvalidReceipt("No transaction found".to_string()))?;
+        let transaction_opt = apple_response
+            .latest_receipt_info
+            .as_ref()
+            .and_then(|txns| txns.first());
+
+        let (original_transaction_id, product_id, expires_date_ms, is_family_shared, subscription_status) =
+            if let Some(transaction) = transaction_opt {
+                // Extract family sharing status
+                let is_family_shared = transaction
+                    .in_app_ownership_type
+                    .as_deref()
+                    .map(|t| t == "FAMILY_SHARED")
+                    .unwrap_or(false);
+
+                // Determine subscription status
+                let subscription_status = Self::determine_subscription_status(
+                    transaction.expires_date_ms.as_deref(),
+                    transaction.cancellation_date_ms.as_deref(),
+                    transaction.is_in_billing_retry_period.as_deref(),
+                );
 
                 (
                     transaction.original_transaction_id.clone(),
                     Some(transaction.product_id.clone()),
                     transaction.expires_date_ms.clone(),
+                    is_family_shared,
+                    subscription_status,
                 )
             } else if let Some(receipt) = &apple_response.receipt {
+                // No transaction info - likely a non-subscription purchase
                 (
                     receipt.original_transaction_id.clone(),
                     receipt.product_id.clone(),
                     None,
+                    false, // No family sharing info available
+                    None,  // No subscription status for non-subscriptions
                 )
             } else {
                 return Err(ApiError::InvalidReceipt(
@@ -130,8 +160,8 @@ impl IAPService {
             .and_then(|ts_ms| time::OffsetDateTime::from_unix_timestamp(ts_ms / 1000).ok());
 
         info!(
-            "Successfully verified Apple IAP receipt: tier={:?}, product_id={:?}",
-            purchase_tier, product_id
+            "Successfully verified Apple IAP receipt: tier={:?}, product_id={:?}, family_shared={}, status={:?}",
+            purchase_tier, product_id, is_family_shared, subscription_status
         );
 
         Ok(IAPVerification {
@@ -140,11 +170,54 @@ impl IAPService {
             product_id,
             valid_until,
             platform: IAPPlatform::Apple,
+            is_family_shared,
+            subscription_status,
         })
     }
 
+    /// Determine subscription status from Apple receipt data
+    fn determine_subscription_status(
+        expires_date_ms: Option<&str>,
+        cancellation_date_ms: Option<&str>,
+        is_in_billing_retry: Option<&str>,
+    ) -> Option<String> {
+        let now = time::OffsetDateTime::now_utc();
+
+        // If cancelled, status is "cancelled"
+        if cancellation_date_ms.is_some() {
+            return Some("cancelled".to_string());
+        }
+
+        // If in billing retry period, status is "billing_retry"
+        if is_in_billing_retry == Some("true") {
+            return Some("billing_retry".to_string());
+        }
+
+        // Check expiration date
+        if let Some(expires_ms) = expires_date_ms {
+            if let Ok(ts_ms) = expires_ms.parse::<i64>() {
+                if let Ok(expires_date) = time::OffsetDateTime::from_unix_timestamp(ts_ms / 1000) {
+                    if expires_date > now {
+                        return Some("active".to_string());
+                    } else {
+                        // Check if in grace period (7 days after expiration)
+                        let grace_period_end = expires_date + time::Duration::days(7);
+                        if now < grace_period_end {
+                            return Some("grace_period".to_string());
+                        } else {
+                            return Some("expired".to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        // No expiration date = likely not a subscription, or status unknown
+        None
+    }
+
     /// Verify Google IAP receipt
-    async fn verify_google_receipt(&self, receipt: &str) -> Result<IAPVerification> {
+    async fn verify_google_receipt(&self, _receipt: &str) -> Result<IAPVerification> {
         // TODO: Implement Google Play verification
         // This would use Google Play Developer API with service account credentials
         // For MVP, return a placeholder or error

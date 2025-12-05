@@ -104,7 +104,7 @@ impl WelcomeBonusService {
         let txn = self.db.begin().await?;
 
         // Insert welcome bonus record
-        let bonus_id = Uuid::new_v4();
+        let bonus_id = Uuid::now_v7(); // Use UUID v7 for time-ordered IDs
         let now = time::OffsetDateTime::now_utc();
 
         let new_bonus = entity::welcome_bonuses::ActiveModel {
