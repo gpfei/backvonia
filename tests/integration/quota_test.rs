@@ -1,12 +1,14 @@
 use backvonia::{
     config::{Config, QuotaConfig},
-    models::common::{AIOperation, PurchaseTier},
+    models::common::AIOperation,
     services::QuotaService,
 };
+use entity::sea_orm_active_enums::AccountTier;
 use migration::{Migrator, MigratorTrait};
 use sea_orm::{Database, DatabaseConnection};
 use std::sync::Arc;
 use tokio::sync::Barrier;
+use uuid::Uuid;
 
 async fn setup_test_db() -> DatabaseConnection {
     let database_url = std::env::var("TEST_DATABASE_URL")
@@ -34,6 +36,7 @@ fn create_test_quota_config() -> QuotaConfig {
 }
 
 #[tokio::test]
+#[ignore] // Run only when test database is available
 async fn test_quota_race_condition_prevented() {
     let db = setup_test_db().await;
     let config = create_test_quota_config();
@@ -41,8 +44,8 @@ async fn test_quota_race_condition_prevented() {
 
     // Test identity with free tier (15 credits from subscription)
     // Each ContinueProse operation costs 5 credits, so should allow 3 operations
-    let identity = format!("test_identity_{}", uuid::Uuid::new_v4());
-    let tier = PurchaseTier::Free;
+    let user_id = Uuid::new_v4();
+    let tier = AccountTier::Free;
 
     // Spawn 10 concurrent requests
     let barrier = Arc::new(Barrier::new(10));
@@ -50,8 +53,8 @@ async fn test_quota_race_condition_prevented() {
 
     for _ in 0..10 {
         let service = Arc::clone(&service);
-        let identity = identity.clone();
         let barrier = Arc::clone(&barrier);
+        let tier_clone = tier.clone();
 
         let handle: tokio::task::JoinHandle<
             backvonia::error::Result<backvonia::services::quota_service::QuotaStatus>,
@@ -61,7 +64,7 @@ async fn test_quota_race_condition_prevented() {
 
             // Try to use credits atomically (ContinueProse = 5 credits)
             service
-                .check_and_increment_quota_weighted(&identity, tier, AIOperation::ContinueProse)
+                .check_and_increment_quota_weighted(user_id, &tier_clone, AIOperation::ContinueProse)
                 .await
         });
 
@@ -94,17 +97,18 @@ async fn test_quota_race_condition_prevented() {
 }
 
 #[tokio::test]
+#[ignore] // Run only when test database is available
 async fn test_quota_check_and_increment_atomic() {
     let db = setup_test_db().await;
     let config = create_test_quota_config();
     let service = QuotaService::new(db, &config);
 
-    let identity = format!("test_atomic_{}", uuid::Uuid::new_v4());
-    let tier = PurchaseTier::Free;
+    let user_id = Uuid::new_v4();
+    let tier = AccountTier::Free;
 
     // First operation should succeed (ContinueProse = 5 credits)
     let result1 = service
-        .check_and_increment_quota_weighted(&identity, tier, AIOperation::ContinueProse)
+        .check_and_increment_quota_weighted(user_id, &tier, AIOperation::ContinueProse)
         .await;
     assert!(result1.is_ok());
     let status1 = result1.unwrap();
@@ -112,7 +116,7 @@ async fn test_quota_check_and_increment_atomic() {
 
     // Second operation should succeed
     let result2 = service
-        .check_and_increment_quota_weighted(&identity, tier, AIOperation::ContinueProse)
+        .check_and_increment_quota_weighted(user_id, &tier, AIOperation::ContinueProse)
         .await;
     assert!(result2.is_ok());
     let status2 = result2.unwrap();
@@ -120,7 +124,7 @@ async fn test_quota_check_and_increment_atomic() {
 
     // Third operation should succeed
     let result3 = service
-        .check_and_increment_quota_weighted(&identity, tier, AIOperation::ContinueProse)
+        .check_and_increment_quota_weighted(user_id, &tier, AIOperation::ContinueProse)
         .await;
     assert!(result3.is_ok());
     let status3 = result3.unwrap();
@@ -128,7 +132,7 @@ async fn test_quota_check_and_increment_atomic() {
 
     // Fourth operation should fail (quota exceeded)
     let result4 = service
-        .check_and_increment_quota_weighted(&identity, tier, AIOperation::ContinueProse)
+        .check_and_increment_quota_weighted(user_id, &tier, AIOperation::ContinueProse)
         .await;
     assert!(result4.is_err());
 
@@ -136,16 +140,17 @@ async fn test_quota_check_and_increment_atomic() {
 }
 
 #[tokio::test]
+#[ignore] // Run only when test database is available
 async fn test_quota_pro_tier_limits() {
     let db = setup_test_db().await;
     let config = create_test_quota_config();
     let service = QuotaService::new(db, &config);
 
-    let identity = format!("test_pro_{}", uuid::Uuid::new_v4());
-    let tier = PurchaseTier::Pro;
+    let user_id = Uuid::new_v4();
+    let tier = AccountTier::Pro;
 
     // Pro tier should have higher subscription credits (5000)
-    let quota_info = service.get_quota_info(&identity, tier).await.unwrap();
+    let quota_info = service.get_quota_info(user_id, &tier).await.unwrap();
 
     assert_eq!(quota_info.subscription_credits, 5000);
     assert_eq!(quota_info.total_credits_remaining, 5000);

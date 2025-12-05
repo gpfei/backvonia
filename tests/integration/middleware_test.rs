@@ -1,24 +1,22 @@
-use backvonia::middleware::IAPIdentity;
-use backvonia::models::common::{IAPPlatform, PurchaseTier};
+use backvonia::middleware::UserIdentity;
+use entity::sea_orm_active_enums::AccountTier;
+use uuid::Uuid;
 
 #[test]
-fn test_iap_identity_struct() {
-    // Basic test to verify IAPIdentity structure works
-    let identity = IAPIdentity {
-        purchase_identity: "test_user_123".to_string(),
-        purchase_tier: PurchaseTier::Free,
-        platform: IAPPlatform::Apple,
+fn test_user_identity_struct() {
+    // Basic test to verify UserIdentity structure works
+    let identity = UserIdentity {
+        user_id: Uuid::new_v4(),
+        account_tier: AccountTier::Free,
     };
 
-    assert_eq!(identity.purchase_identity, "test_user_123");
-    assert_eq!(identity.purchase_tier, PurchaseTier::Free);
-    assert_eq!(identity.platform, IAPPlatform::Apple);
+    assert_eq!(identity.account_tier, AccountTier::Free);
 }
 
 #[test]
-fn test_purchase_tier_variants() {
-    let free = PurchaseTier::Free;
-    let pro = PurchaseTier::Pro;
+fn test_account_tier_variants() {
+    let free = AccountTier::Free;
+    let pro = AccountTier::Pro;
 
     assert_ne!(free, pro);
 }

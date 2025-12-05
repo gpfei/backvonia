@@ -11,12 +11,21 @@ use entity::{
     sea_orm_active_enums::{AccountTier, UserStatus},
     user_auth_methods, users,
 };
+use jsonwebtoken::{decode, decode_header, jwk::JwkSet, DecodingKey, Validation, Algorithm};
 use sea_orm::{entity::*, query::*, sea_query::Expr, ActiveValue::Set, DatabaseConnection};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use time::OffsetDateTime;
-use tracing::{info, warn};
+use tokio::sync::RwLock;
+use tracing::{info, warn, debug};
 use uuid::Uuid;
+
+/// Apple's JWKS endpoint
+const APPLE_JWKS_URL: &str = "https://appleid.apple.com/auth/keys";
+/// Apple's issuer
+const APPLE_ISSUER: &str = "https://appleid.apple.com";
+/// Cache duration for Apple's JWKS (1 hour)
+const JWKS_CACHE_DURATION_SECS: i64 = 3600;
 
 /// Apple ID token payload (subset of claims we care about)
 #[derive(Debug, Deserialize)]
@@ -27,6 +36,20 @@ pub struct AppleIdTokenPayload {
     pub email: Option<String>,
     /// Email verified flag
     pub email_verified: Option<bool>,
+    /// Issuer (should be https://appleid.apple.com)
+    pub iss: String,
+    /// Audience (should be our app's client ID)
+    pub aud: String,
+    /// Expiration time (Unix timestamp)
+    pub exp: i64,
+    /// Issued at (Unix timestamp)
+    pub iat: i64,
+}
+
+/// Cached JWKS with timestamp
+struct CachedJwks {
+    jwks: JwkSet,
+    fetched_at: OffsetDateTime,
 }
 
 /// User info returned after authentication
@@ -63,6 +86,8 @@ pub struct AuthService {
     refresh_token_service: Arc<RefreshTokenService>,
     welcome_bonus_service: Arc<WelcomeBonusService>,
     config: Arc<AuthConfig>,
+    /// Cached Apple JWKS for signature verification
+    apple_jwks_cache: Arc<RwLock<Option<CachedJwks>>>,
 }
 
 impl AuthService {
@@ -79,17 +104,23 @@ impl AuthService {
             refresh_token_service,
             welcome_bonus_service,
             config,
+            apple_jwks_cache: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Get access token expiration in seconds from config
+    fn access_token_expiration_seconds(&self) -> u64 {
+        self.config.access_token_expiration_minutes * 60
     }
 
     /// Verify Apple ID token and find or create user
     ///
     /// This method:
-    /// 1. Verifies the Apple ID token (in production, would validate JWT signature with Apple's JWKS)
+    /// 1. Verifies the Apple ID token (validates JWT signature with Apple's JWKS)
     /// 2. Extracts the 'sub' (Apple's unique user ID)
     /// 3. Finds or creates user and auth_method records
     /// 4. Grants welcome bonus if eligible (new user + device_id provided)
-    /// 5. Generates access token (15 min) and refresh token (7 days)
+    /// 5. Generates access token and refresh token
     /// 6. Returns AuthTokens with both tokens, user info, and welcome bonus status
     pub async fn authenticate_with_apple(
         &self,
@@ -97,14 +128,8 @@ impl AuthService {
         full_name: Option<String>,
         device_info: Option<DeviceInfo>,
     ) -> Result<AuthTokens> {
-        // Parse and verify Apple ID token
-        // NOTE: In production, this should:
-        // 1. Fetch Apple's JWKS from https://appleid.apple.com/auth/keys
-        // 2. Verify JWT signature with public key
-        // 3. Validate issuer, audience, expiration
-        //
-        // For MVP, we'll do basic JWT parsing
-        let apple_payload = self.parse_apple_id_token(id_token)?;
+        // Verify Apple ID token with full signature validation
+        let apple_payload = self.verify_apple_id_token(id_token).await?;
 
         // Find or create user
         let (user, is_new_user) = self
@@ -205,10 +230,12 @@ impl AuthService {
             created_at: user.created_at,
         };
 
+        let expires_in = self.access_token_expiration_seconds();
+
         Ok(AuthTokens {
             access_token,
             refresh_token,
-            expires_in: 900,  // 15 minutes in seconds
+            expires_in,
             user: user_info,
             welcome_bonus,
         })
@@ -240,7 +267,7 @@ impl AuthService {
             .jwt_service
             .generate_token(user.id, user.account_tier)?;
 
-        Ok((access_token, 900)) // 15 minutes in seconds
+        Ok((access_token, self.access_token_expiration_seconds()))
     }
 
     /// Logout - revoke a specific refresh token
@@ -334,26 +361,108 @@ impl AuthService {
         Ok(())
     }
 
-    /// Parse Apple ID token (basic JWT parsing without signature verification)
+    /// Verify and parse Apple ID token with full signature validation
     ///
-    /// NOTE: In production, this MUST verify the JWT signature with Apple's public keys
-    /// from https://appleid.apple.com/auth/keys
-    fn parse_apple_id_token(&self, id_token: &str) -> Result<AppleIdTokenPayload> {
-        // Split JWT parts
-        let parts: Vec<&str> = id_token.split('.').collect();
-        if parts.len() != 3 {
-            return Err(ApiError::InvalidToken("Invalid JWT format".to_string()));
+    /// This method:
+    /// 1. Fetches Apple's JWKS (with caching)
+    /// 2. Extracts the key ID from the token header
+    /// 3. Finds the matching public key
+    /// 4. Verifies the JWT signature
+    /// 5. Validates issuer, audience, and expiration
+    /// 6. Returns the parsed payload
+    async fn verify_apple_id_token(&self, id_token: &str) -> Result<AppleIdTokenPayload> {
+        // 1. Get the token header to find the key ID (kid)
+        let header = decode_header(id_token)
+            .map_err(|e| ApiError::InvalidToken(format!("Invalid JWT header: {}", e)))?;
+
+        let kid = header.kid
+            .ok_or_else(|| ApiError::InvalidToken("Missing key ID in token header".to_string()))?;
+
+        // 2. Get Apple's JWKS (cached)
+        let jwks = self.get_apple_jwks().await?;
+
+        // 3. Find the matching key
+        let jwk = jwks.keys.iter()
+            .find(|k| k.common.key_id.as_ref() == Some(&kid))
+            .ok_or_else(|| ApiError::InvalidToken(format!("Key ID '{}' not found in Apple's JWKS", kid)))?;
+
+        // 4. Create decoding key from JWK
+        let decoding_key = DecodingKey::from_jwk(jwk)
+            .map_err(|e| ApiError::InvalidToken(format!("Failed to create decoding key: {}", e)))?;
+
+        // 5. Set up validation
+        let mut validation = Validation::new(Algorithm::RS256);
+        validation.set_issuer(&[APPLE_ISSUER]);
+        validation.set_audience(&[&self.config.apple_client_id]);
+
+        // 6. Decode and validate
+        let token_data = decode::<AppleIdTokenPayload>(id_token, &decoding_key, &validation)
+            .map_err(|e| match e.kind() {
+                jsonwebtoken::errors::ErrorKind::ExpiredSignature => {
+                    ApiError::ExpiredToken
+                }
+                jsonwebtoken::errors::ErrorKind::InvalidIssuer => {
+                    ApiError::InvalidToken("Invalid token issuer".to_string())
+                }
+                jsonwebtoken::errors::ErrorKind::InvalidAudience => {
+                    ApiError::InvalidToken("Invalid token audience".to_string())
+                }
+                _ => ApiError::InvalidToken(format!("Token validation failed: {}", e)),
+            })?;
+
+        debug!(
+            sub = %token_data.claims.sub,
+            "Apple ID token verified successfully"
+        );
+
+        Ok(token_data.claims)
+    }
+
+    /// Fetch Apple's JWKS with caching
+    async fn get_apple_jwks(&self) -> Result<JwkSet> {
+        let now = OffsetDateTime::now_utc();
+
+        // Check cache first
+        {
+            let cache = self.apple_jwks_cache.read().await;
+            if let Some(ref cached) = *cache {
+                let age = (now - cached.fetched_at).whole_seconds();
+                if age < JWKS_CACHE_DURATION_SECS {
+                    debug!("Using cached Apple JWKS (age: {}s)", age);
+                    return Ok(cached.jwks.clone());
+                }
+            }
         }
 
-        // Decode payload (base64url)
-        use base64::{Engine as _, engine::general_purpose};
-        let payload_bytes = general_purpose::URL_SAFE_NO_PAD.decode(parts[1])
-            .map_err(|e| ApiError::InvalidToken(format!("Failed to decode payload: {}", e)))?;
+        // Fetch fresh JWKS
+        debug!("Fetching Apple JWKS from {}", APPLE_JWKS_URL);
+        let response = reqwest::get(APPLE_JWKS_URL)
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("Failed to fetch Apple JWKS: {}", e)))?;
 
-        let payload: AppleIdTokenPayload = serde_json::from_slice(&payload_bytes)
-            .map_err(|e| ApiError::InvalidToken(format!("Failed to parse payload: {}", e)))?;
+        if !response.status().is_success() {
+            return Err(ApiError::Internal(anyhow::anyhow!(
+                "Apple JWKS request failed with status: {}",
+                response.status()
+            )));
+        }
 
-        Ok(payload)
+        let jwks: JwkSet = response
+            .json()
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("Failed to parse Apple JWKS: {}", e)))?;
+
+        // Update cache
+        {
+            let mut cache = self.apple_jwks_cache.write().await;
+            *cache = Some(CachedJwks {
+                jwks: jwks.clone(),
+                fetched_at: now,
+            });
+        }
+
+        info!("Apple JWKS fetched and cached ({} keys)", jwks.keys.len());
+        Ok(jwks)
     }
 
     /// Get user by ID

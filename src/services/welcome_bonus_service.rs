@@ -82,9 +82,12 @@ impl WelcomeBonusService {
 
     /// Grant welcome bonus to a user
     ///
-    /// This method:
+    /// This method atomically:
     /// 1. Inserts a record into welcome_bonuses table
-    /// 2. Calls credits_service.record_purchase() to add credits
+    /// 2. Calls credits_service.record_purchase_in_txn() to add credits
+    ///
+    /// Both operations are in a single transaction - if credits fail,
+    /// the bonus record is also rolled back.
     ///
     /// The method is idempotent - if called multiple times for the same user,
     /// it will fail gracefully due to unique constraints.
@@ -97,7 +100,7 @@ impl WelcomeBonusService {
         provider_user_id: &str,
         amount: i32,
     ) -> Result<()> {
-        // Start transaction
+        // Start transaction - both bonus record AND credits will be in same txn
         let txn = self.db.begin().await?;
 
         // Insert welcome bonus record
@@ -148,12 +151,7 @@ impl WelcomeBonusService {
             }
         }
 
-        // Commit the transaction (bonus record created)
-        txn.commit().await?;
-
-        // Record the credit purchase
-        // Note: This is done AFTER the bonus record is committed to ensure
-        // we don't grant credits without tracking in welcome_bonuses table
+        // Record the credit purchase in the SAME transaction
         let platform = match provider {
             "apple" => IAPPlatform::Apple,
             "google" => IAPPlatform::Google,
@@ -163,9 +161,9 @@ impl WelcomeBonusService {
         let transaction_id = format!("welcome-bonus-{}", user_id);
         let product_id = "com.talevonia.welcome.bonus";
 
-        match self
+        let (purchase_id, granted_amount) = self
             .credits_service
-            .record_purchase(
+            .record_purchase_in_txn(
                 user_id,
                 None, // No original_transaction_id for welcome bonus
                 &transaction_id,
@@ -174,32 +172,20 @@ impl WelcomeBonusService {
                 amount,
                 now,
                 None, // No receipt
+                &txn,
             )
-            .await
-        {
-            Ok((purchase_id, granted_amount)) => {
-                info!(
-                    user_id = %user_id,
-                    purchase_id = %purchase_id,
-                    amount = granted_amount,
-                    "Welcome bonus credits granted successfully"
-                );
-                Ok(())
-            }
-            Err(e) => {
-                // Credit recording failed after bonus record was created
-                // This is a serious issue - log it but don't rollback the bonus record
-                // since it's already committed. The user will need manual credit adjustment.
-                warn!(
-                    user_id = %user_id,
-                    error = %e,
-                    "Failed to record welcome bonus credits after creating bonus record. Manual credit adjustment needed."
-                );
-                Err(ApiError::Internal(anyhow::anyhow!(
-                    "Welcome bonus recorded but credits grant failed: {}",
-                    e
-                )))
-            }
-        }
+            .await?;
+
+        // Commit both the bonus record AND the credits atomically
+        txn.commit().await?;
+
+        info!(
+            user_id = %user_id,
+            purchase_id = %purchase_id,
+            amount = granted_amount,
+            "Welcome bonus granted successfully (bonus record + credits committed atomically)"
+        );
+
+        Ok(())
     }
 }

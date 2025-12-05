@@ -27,6 +27,7 @@ impl CreditsService {
 
     /// Record a new credit purchase
     #[instrument(skip(self, receipt_data))]
+    #[allow(clippy::too_many_arguments)]
     pub async fn record_purchase(
         &self,
         user_id: Uuid,
@@ -100,6 +101,85 @@ impl CreditsService {
 
         info!(
             "Recorded credit purchase: user={}, transaction={}, amount={}, total_extra={}",
+            user_id, transaction_id, amount, total_extra
+        );
+
+        Ok((purchase_id, total_extra))
+    }
+
+    /// Record a new credit purchase within an existing transaction
+    /// Used by services that need to atomically combine bonus tracking with credit grants
+    #[instrument(skip(self, receipt_data, txn))]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn record_purchase_in_txn(
+        &self,
+        user_id: Uuid,
+        original_transaction_id: Option<&str>,
+        transaction_id: &str,
+        product_id: &str,
+        platform: IAPPlatform,
+        amount: i32,
+        purchase_date: time::OffsetDateTime,
+        receipt_data: Option<&str>,
+        txn: &DatabaseTransaction,
+    ) -> Result<(uuid::Uuid, i32)> {
+        // Prepare new purchase record
+        let now = time::OffsetDateTime::now_utc();
+        let purchase_id = Uuid::new_v4();
+
+        let new_purchase = entity::credit_purchases::ActiveModel {
+            id: Set(purchase_id),
+            user_id: Set(user_id),
+            original_transaction_id: Set(original_transaction_id.map(|s| s.to_string())),
+            transaction_id: Set(transaction_id.to_string()),
+            product_id: Set(product_id.to_string()),
+            platform: Set(platform.as_str().to_string()),
+            amount: Set(amount),
+            consumed: Set(0),
+            purchase_date: Set(purchase_date),
+            verified_at: Set(now),
+            receipt_data: Set(receipt_data.map(|s| s.to_string())),
+            revoked_at: Set(None),
+            revoked_reason: Set(None),
+        };
+
+        // Insert purchase atomically; if the transaction_id already exists, do nothing
+        entity::credit_purchases::Entity::insert(new_purchase)
+            .on_conflict(
+                OnConflict::column(entity::credit_purchases::Column::TransactionId)
+                    .do_nothing()
+                    .to_owned(),
+            )
+            .exec(txn)
+            .await?;
+
+        // Check whether this purchase was inserted or already existed
+        let persisted_purchase = entity::credit_purchases::Entity::find()
+            .filter(entity::credit_purchases::Column::TransactionId.eq(transaction_id))
+            .one(txn)
+            .await?
+            .ok_or_else(|| {
+                ApiError::Internal(anyhow!(
+                    "Failed to read purchase after insert for transaction {}",
+                    transaction_id
+                ))
+            })?;
+
+        if persisted_purchase.id != purchase_id {
+            // Another transaction already created this record
+            return Err(ApiError::Conflict(format!(
+                "Transaction {} already processed at {}",
+                transaction_id, persisted_purchase.verified_at
+            )));
+        }
+
+        // Successfully inserted - recalculate totals
+        let total_extra = self
+            .recalculate_extra_credits_txn(user_id, txn)
+            .await?;
+
+        info!(
+            "Recorded credit purchase in txn: user={}, transaction={}, amount={}, total_extra={}",
             user_id, transaction_id, amount, total_extra
         );
 

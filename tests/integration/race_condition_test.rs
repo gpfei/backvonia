@@ -26,7 +26,7 @@ async fn test_concurrent_duplicate_transactions() {
     let db = setup_test_db().await;
     let service = Arc::new(CreditsService::new(db));
 
-    let user_id = format!("test-user-{}", Uuid::new_v4());
+    let user_id = Uuid::new_v4();
     let transaction_id = format!("txn-{}", Uuid::new_v4());
 
     // Spawn 5 concurrent requests with the SAME transaction_id
@@ -34,13 +34,12 @@ async fn test_concurrent_duplicate_transactions() {
 
     for i in 0..5 {
         let service_clone = service.clone();
-        let user_id_clone = user_id.clone();
         let transaction_id_clone = transaction_id.clone();
 
         tasks.spawn(async move {
             let result = service_clone
                 .record_purchase(
-                    &user_id_clone,
+                    user_id,
                     Some("original-txn-123"),
                     &transaction_id_clone,
                     "com.talevonia.tale.credits.500",
@@ -104,13 +103,13 @@ async fn test_sequential_duplicate_transactions() {
     let db = setup_test_db().await;
     let service = CreditsService::new(db);
 
-    let user_id = format!("test-user-{}", Uuid::new_v4());
+    let user_id = Uuid::new_v4();
     let transaction_id = format!("txn-{}", Uuid::new_v4());
 
     // First request - should succeed
     let first_result = service
         .record_purchase(
-            &user_id,
+            user_id,
             Some("original-txn-123"),
             &transaction_id,
             "com.talevonia.tale.credits.500",
@@ -128,7 +127,7 @@ async fn test_sequential_duplicate_transactions() {
     // Second request with same transaction_id - should get Conflict
     let second_result = service
         .record_purchase(
-            &user_id,
+            user_id,
             Some("original-txn-123"),
             &transaction_id,
             "com.talevonia.tale.credits.500",
