@@ -586,7 +586,7 @@ components:
           nullable: true
         status:
           type: string
-          enum: [active, banned, deleted, shadow_banned]
+          enum: [active, suspended, deleted]
         accountTier:
           type: string
           enum: [free, pro]
