@@ -1,5 +1,5 @@
 use backvonia::models::common::IAPPlatform;
-use backvonia::models::credit_purchases_ext::CreditPurchaseExt;
+use backvonia::models::credit_events_ext::CreditEventExt;
 use backvonia::services::CreditsService;
 use sea_orm::{Database, DatabaseConnection};
 use uuid::Uuid;

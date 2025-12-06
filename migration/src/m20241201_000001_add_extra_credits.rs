@@ -6,37 +6,38 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Create credit_purchases table
+        // Create credits_events table (unified ledger for purchases, welcome bonuses, adjustments)
         manager
             .create_table(
                 Table::create()
-                    .table(CreditPurchases::Table)
+                    .table(CreditsEvents::Table)
                     .if_not_exists()
-                    .col(pk_uuid(CreditPurchases::Id))
-                    .col(uuid(CreditPurchases::UserId).not_null())
-                    .col(string_null(CreditPurchases::OriginalTransactionId))
+                    .col(pk_uuid(CreditsEvents::Id))
+                    .col(uuid(CreditsEvents::UserId).not_null())
+                    .col(string(CreditsEvents::EventType).not_null())
+                    .col(string_null(CreditsEvents::OriginalTransactionId))
+                    .col(string(CreditsEvents::TransactionId).unique_key().not_null())
+                    .col(string_null(CreditsEvents::ProductId))
+                    .col(string_null(CreditsEvents::Platform))
+                    .col(integer(CreditsEvents::Amount).not_null())
+                    .col(integer(CreditsEvents::Consumed).default(0).not_null())
+                    .col(timestamp_with_time_zone(CreditsEvents::OccurredAt).not_null())
                     .col(
-                        string(CreditPurchases::TransactionId)
-                            .unique_key()
-                            .not_null(),
-                    )
-                    .col(string(CreditPurchases::ProductId).not_null())
-                    .col(string(CreditPurchases::Platform).not_null())
-                    .col(integer(CreditPurchases::Amount).not_null())
-                    .col(integer(CreditPurchases::Consumed).default(0).not_null())
-                    .col(timestamp_with_time_zone(CreditPurchases::PurchaseDate).not_null())
-                    .col(
-                        timestamp_with_time_zone(CreditPurchases::VerifiedAt)
+                        timestamp_with_time_zone(CreditsEvents::VerifiedAt)
                             .default(Expr::current_timestamp())
                             .not_null(),
                     )
-                    .col(text_null(CreditPurchases::ReceiptData))
-                    .col(timestamp_with_time_zone_null(CreditPurchases::RevokedAt))
-                    .col(string_null(CreditPurchases::RevokedReason))
+                    .col(text_null(CreditsEvents::ReceiptData))
+                    .col(timestamp_with_time_zone_null(CreditsEvents::RevokedAt))
+                    .col(string_null(CreditsEvents::RevokedReason))
+                    .col(string_null(CreditsEvents::DeviceId))
+                    .col(string_null(CreditsEvents::Provider))
+                    .col(string_null(CreditsEvents::ProviderUserId))
+                    .col(json_binary_null(CreditsEvents::Metadata))
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk_credit_purchases_user_id")
-                            .from(CreditPurchases::Table, CreditPurchases::UserId)
+                            .name("fk_credits_events_user_id")
+                            .from(CreditsEvents::Table, CreditsEvents::UserId)
                             .to(Users::Table, Users::Id)
                             .on_delete(ForeignKeyAction::Cascade),
                     )
@@ -44,13 +45,14 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Create indexes on credit_purchases
+        // Create indexes on credits_events
         manager
             .create_index(
                 Index::create()
-                    .name("idx_credit_purchases_user_id")
-                    .table(CreditPurchases::Table)
-                    .col(CreditPurchases::UserId)
+                    .name("idx_credits_events_user_id")
+                    .table(CreditsEvents::Table)
+                    .col(CreditsEvents::UserId)
+                    .col(CreditsEvents::OccurredAt)
                     .to_owned(),
             )
             .await?;
@@ -58,9 +60,9 @@ impl MigrationTrait for Migration {
         manager
             .create_index(
                 Index::create()
-                    .name("idx_credit_purchases_transaction_id")
-                    .table(CreditPurchases::Table)
-                    .col(CreditPurchases::TransactionId)
+                    .name("idx_credits_events_transaction_id")
+                    .table(CreditsEvents::Table)
+                    .col(CreditsEvents::TransactionId)
                     .to_owned(),
             )
             .await?;
@@ -68,22 +70,44 @@ impl MigrationTrait for Migration {
         manager
             .create_index(
                 Index::create()
-                    .name("idx_credit_purchases_original_transaction_id")
-                    .table(CreditPurchases::Table)
-                    .col(CreditPurchases::OriginalTransactionId)
+                    .name("idx_credits_events_original_transaction_id")
+                    .table(CreditsEvents::Table)
+                    .col(CreditsEvents::OriginalTransactionId)
                     .to_owned(),
             )
             .await?;
 
-        // FIFO index for consumption order
+        // Partial uniqueness for welcome bonuses (one per user/device)
         manager
-            .create_index(
-                Index::create()
-                    .name("idx_credit_purchases_user_purchase_date")
-                    .table(CreditPurchases::Table)
-                    .col(CreditPurchases::UserId)
-                    .col(CreditPurchases::PurchaseDate)
-                    .to_owned(),
+            .get_connection()
+            .execute_unprepared(
+                r#"
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_credits_events_welcome_user
+                ON credits_events (event_type, user_id)
+                WHERE event_type = 'welcome_bonus';
+                "#,
+            )
+            .await?;
+
+        manager
+            .get_connection()
+            .execute_unprepared(
+                r#"
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_credits_events_welcome_device
+                ON credits_events (event_type, device_id)
+                WHERE event_type = 'welcome_bonus' AND device_id IS NOT NULL;
+                "#,
+            )
+            .await?;
+
+        manager
+            .get_connection()
+            .execute_unprepared(
+                r#"
+                CREATE INDEX IF NOT EXISTS idx_credits_events_welcome_provider
+                ON credits_events (provider, provider_user_id)
+                WHERE event_type = 'welcome_bonus';
+                "#,
             )
             .await?;
 
@@ -119,9 +143,21 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Drop credit_purchases table
+        // Drop partial indexes
         manager
-            .drop_table(Table::drop().table(CreditPurchases::Table).to_owned())
+            .get_connection()
+            .execute_unprepared(
+                r#"
+                DROP INDEX IF EXISTS idx_credits_events_welcome_user;
+                DROP INDEX IF EXISTS idx_credits_events_welcome_device;
+                DROP INDEX IF EXISTS idx_credits_events_welcome_provider;
+                "#,
+            )
+            .await?;
+
+        // Drop credits_events table
+        manager
+            .drop_table(Table::drop().table(CreditsEvents::Table).to_owned())
             .await?;
 
         // Remove extra credits columns from quota_usage
@@ -150,21 +186,26 @@ enum Users {
 }
 
 #[derive(DeriveIden)]
-enum CreditPurchases {
+enum CreditsEvents {
     Table,
     Id,
     UserId, // Changed from LocalUserId
+    EventType,
     OriginalTransactionId,
     TransactionId,
     ProductId,
     Platform,
     Amount,
     Consumed,
-    PurchaseDate,
+    OccurredAt,
     VerifiedAt,
     ReceiptData,
     RevokedAt,
     RevokedReason,
+    DeviceId,
+    Provider,
+    ProviderUserId,
+    Metadata,
 }
 
 #[derive(DeriveIden)]

@@ -23,8 +23,8 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(has_many = "super::credit_purchases::Entity")]
-    CreditPurchases,
+    #[sea_orm(has_many = "super::credits_events::Entity")]
+    CreditsEvents,
     #[sea_orm(has_many = "super::iap_receipt_cache::Entity")]
     IapReceiptCache,
     #[sea_orm(has_many = "super::quota_usage::Entity")]
@@ -35,13 +35,11 @@ pub enum Relation {
     UserAuthMethods,
     #[sea_orm(has_one = "super::user_credit_balance::Entity")]
     UserCreditBalance,
-    #[sea_orm(has_one = "super::welcome_bonuses::Entity")]
-    WelcomeBonuses,
 }
 
-impl Related<super::credit_purchases::Entity> for Entity {
+impl Related<super::credits_events::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::CreditPurchases.def()
+        Relation::CreditsEvents.def()
     }
 }
 
@@ -72,12 +70,6 @@ impl Related<super::user_auth_methods::Entity> for Entity {
 impl Related<super::user_credit_balance::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::UserCreditBalance.def()
-    }
-}
-
-impl Related<super::welcome_bonuses::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::WelcomeBonuses.def()
     }
 }
 

@@ -2,7 +2,7 @@ use crate::{
     error::{ApiError, Result},
     models::{
         common::IAPPlatform,
-        credit_purchases_ext::CreditPurchaseExt,
+        credit_events_ext::CreditEventExt,
         credits::{
             CreditPurchaseRecord, CreditsQuotaInfo, ExtraCreditsInfo, SubscriptionCreditsInfo,
         },
@@ -46,26 +46,31 @@ impl CreditsService {
         let now = time::OffsetDateTime::now_utc();
         let purchase_id = Uuid::new_v4();
 
-        let new_purchase = entity::credit_purchases::ActiveModel {
+        let new_purchase = entity::credits_events::ActiveModel {
             id: Set(purchase_id),
             user_id: Set(user_id),
+            event_type: Set("purchase".to_string()),
             original_transaction_id: Set(original_transaction_id.map(|s| s.to_string())),
             transaction_id: Set(transaction_id.to_string()),
-            product_id: Set(product_id.to_string()),
-            platform: Set(platform.as_str().to_string()),
+            product_id: Set(Some(product_id.to_string())),
+            platform: Set(Some(platform.as_str().to_string())),
             amount: Set(amount),
             consumed: Set(0),
-            purchase_date: Set(purchase_date),
+            occurred_at: Set(purchase_date),
             verified_at: Set(now),
             receipt_data: Set(receipt_data.map(|s| s.to_string())),
             revoked_at: Set(None),
             revoked_reason: Set(None),
+            device_id: Set(None),
+            provider: Set(None),
+            provider_user_id: Set(None),
+            metadata: Set(None),
         };
 
         // Insert purchase atomically; if the transaction_id already exists, do nothing instead of erroring.
-        entity::credit_purchases::Entity::insert(new_purchase)
+        entity::credits_events::Entity::insert(new_purchase)
             .on_conflict(
-                OnConflict::column(entity::credit_purchases::Column::TransactionId)
+                OnConflict::column(entity::credits_events::Column::TransactionId)
                     .do_nothing()
                     .to_owned(),
             )
@@ -73,8 +78,8 @@ impl CreditsService {
             .await?;
 
         // Check whether this purchase was inserted or already existed
-        let persisted_purchase = entity::credit_purchases::Entity::find()
-            .filter(entity::credit_purchases::Column::TransactionId.eq(transaction_id))
+        let persisted_purchase = entity::credits_events::Entity::find()
+            .filter(entity::credits_events::Column::TransactionId.eq(transaction_id))
             .one(&txn)
             .await?
             .ok_or_else(|| {
@@ -125,26 +130,31 @@ impl CreditsService {
         let now = time::OffsetDateTime::now_utc();
         let purchase_id = Uuid::new_v4();
 
-        let new_purchase = entity::credit_purchases::ActiveModel {
+        let new_purchase = entity::credits_events::ActiveModel {
             id: Set(purchase_id),
             user_id: Set(user_id),
+            event_type: Set("purchase".to_string()),
             original_transaction_id: Set(original_transaction_id.map(|s| s.to_string())),
             transaction_id: Set(transaction_id.to_string()),
-            product_id: Set(product_id.to_string()),
-            platform: Set(platform.as_str().to_string()),
+            product_id: Set(Some(product_id.to_string())),
+            platform: Set(Some(platform.as_str().to_string())),
             amount: Set(amount),
             consumed: Set(0),
-            purchase_date: Set(purchase_date),
+            occurred_at: Set(purchase_date),
             verified_at: Set(now),
             receipt_data: Set(receipt_data.map(|s| s.to_string())),
             revoked_at: Set(None),
             revoked_reason: Set(None),
+            device_id: Set(None),
+            provider: Set(None),
+            provider_user_id: Set(None),
+            metadata: Set(None),
         };
 
         // Insert purchase atomically; if the transaction_id already exists, do nothing
-        entity::credit_purchases::Entity::insert(new_purchase)
+        entity::credits_events::Entity::insert(new_purchase)
             .on_conflict(
-                OnConflict::column(entity::credit_purchases::Column::TransactionId)
+                OnConflict::column(entity::credits_events::Column::TransactionId)
                     .do_nothing()
                     .to_owned(),
             )
@@ -152,8 +162,8 @@ impl CreditsService {
             .await?;
 
         // Check whether this purchase was inserted or already existed
-        let persisted_purchase = entity::credit_purchases::Entity::find()
-            .filter(entity::credit_purchases::Column::TransactionId.eq(transaction_id))
+        let persisted_purchase = entity::credits_events::Entity::find()
+            .filter(entity::credits_events::Column::TransactionId.eq(transaction_id))
             .one(txn)
             .await?
             .ok_or_else(|| {
@@ -182,16 +192,84 @@ impl CreditsService {
         Ok((purchase_id, total_extra))
     }
 
+    /// Record a welcome bonus event within an existing transaction
+    #[instrument(skip(self, txn))]
+    pub async fn record_welcome_bonus_in_txn(
+        &self,
+        user_id: Uuid,
+        device_id: &str,
+        provider: &str,
+        provider_user_id: &str,
+        amount: i32,
+        granted_at: time::OffsetDateTime,
+        txn: &DatabaseTransaction,
+    ) -> Result<(uuid::Uuid, i32)> {
+        let event_id = Uuid::new_v4();
+        let transaction_id = format!("welcome-bonus-{}", user_id);
+
+        let new_event = entity::credits_events::ActiveModel {
+            id: Set(event_id),
+            user_id: Set(user_id),
+            event_type: Set("welcome_bonus".to_string()),
+            original_transaction_id: Set(None),
+            transaction_id: Set(transaction_id.clone()),
+            product_id: Set(Some("com.talevonia.welcome.bonus".to_string())),
+            platform: Set(Some(provider.to_string())),
+            amount: Set(amount),
+            consumed: Set(0),
+            occurred_at: Set(granted_at),
+            verified_at: Set(granted_at),
+            receipt_data: Set(None),
+            revoked_at: Set(None),
+            revoked_reason: Set(None),
+            device_id: Set(Some(device_id.to_string())),
+            provider: Set(Some(provider.to_string())),
+            provider_user_id: Set(Some(provider_user_id.to_string())),
+            metadata: Set(None),
+        };
+
+        entity::credits_events::Entity::insert(new_event)
+            .on_conflict(
+                OnConflict::column(entity::credits_events::Column::TransactionId)
+                    .do_nothing()
+                    .to_owned(),
+            )
+            .exec(txn)
+            .await?;
+
+        let persisted = entity::credits_events::Entity::find()
+            .filter(entity::credits_events::Column::TransactionId.eq(transaction_id))
+            .one(txn)
+            .await?
+            .ok_or_else(|| {
+                ApiError::Internal(anyhow!(
+                    "Failed to read welcome bonus event after insert for user {}",
+                    user_id
+                ))
+            })?;
+
+        if persisted.id != event_id {
+            return Err(ApiError::BadRequest(
+                "Welcome bonus already granted".to_string(),
+            ));
+        }
+
+        let total_extra = self.recalculate_extra_credits_txn(user_id, txn).await?;
+
+        Ok((event_id, total_extra))
+    }
+
     /// Get all purchases for a user (ordered by purchase_date for FIFO)
     #[instrument(skip(self))]
     pub async fn get_user_purchases(
         &self,
         user_id: Uuid,
-    ) -> Result<Vec<entity::credit_purchases::Model>> {
-        let purchases = entity::credit_purchases::Entity::find()
-            .filter(entity::credit_purchases::Column::UserId.eq(user_id))
-            .filter(entity::credit_purchases::Column::RevokedAt.is_null())
-            .order_by_asc(entity::credit_purchases::Column::PurchaseDate)
+    ) -> Result<Vec<entity::credits_events::Model>> {
+        let purchases = entity::credits_events::Entity::find()
+            .filter(entity::credits_events::Column::UserId.eq(user_id))
+            .filter(entity::credits_events::Column::EventType.eq("purchase"))
+            .filter(entity::credits_events::Column::RevokedAt.is_null())
+            .order_by_asc(entity::credits_events::Column::OccurredAt)
             .all(&self.db)
             .await?;
 
@@ -201,8 +279,14 @@ impl CreditsService {
     /// Calculate total extra credits for a user
     #[instrument(skip(self))]
     pub async fn calculate_total_extra_credits(&self, user_id: Uuid) -> Result<i32> {
-        let purchases = self.get_user_purchases(user_id).await?;
-        let total: i32 = purchases.iter().map(|p| p.remaining()).sum();
+        let events = entity::credits_events::Entity::find()
+            .filter(entity::credits_events::Column::UserId.eq(user_id))
+            .filter(entity::credits_events::Column::RevokedAt.is_null())
+            .filter(entity::credits_events::Column::EventType.ne("consumption"))
+            .all(&self.db)
+            .await?;
+
+        let total: i32 = events.iter().map(|e| e.remaining()).sum();
         Ok(total)
     }
 
@@ -213,14 +297,15 @@ impl CreditsService {
         user_id: Uuid,
         txn: &DatabaseTransaction,
     ) -> Result<i32> {
-        // Calculate total remaining from purchases
-        let purchases = entity::credit_purchases::Entity::find()
-            .filter(entity::credit_purchases::Column::UserId.eq(user_id))
-            .filter(entity::credit_purchases::Column::RevokedAt.is_null())
+        // Calculate total remaining from additive events (purchases, welcome bonuses, adjustments)
+        let events = entity::credits_events::Entity::find()
+            .filter(entity::credits_events::Column::UserId.eq(user_id))
+            .filter(entity::credits_events::Column::RevokedAt.is_null())
+            .filter(entity::credits_events::Column::EventType.ne("consumption"))
             .all(txn)
             .await?;
 
-        let total_remaining: i32 = purchases.iter().map(|p| p.remaining()).sum();
+        let total_remaining: i32 = events.iter().map(|p| p.remaining()).sum();
         let now = time::OffsetDateTime::now_utc();
 
         // CRITICAL FIX: Update user_credit_balance.extra_credits_remaining
@@ -338,31 +423,31 @@ impl CreditsService {
             }
         }
 
-        // 2. SECOND: If subscription exhausted, consume from extra credits (FIFO by purchase_date)
+        // 2. SECOND: If subscription exhausted, consume from extra credits (FIFO by occurred_at)
         if remaining > 0 {
-            let purchases = entity::credit_purchases::Entity::find()
-                .filter(entity::credit_purchases::Column::UserId.eq(user_id))
-                .filter(entity::credit_purchases::Column::RevokedAt.is_null())
-                .order_by_asc(entity::credit_purchases::Column::PurchaseDate)
+            let events = entity::credits_events::Entity::find()
+                .filter(entity::credits_events::Column::UserId.eq(user_id))
+                .filter(entity::credits_events::Column::RevokedAt.is_null())
+                .filter(entity::credits_events::Column::EventType.ne("consumption"))
+                .order_by_asc(entity::credits_events::Column::OccurredAt)
                 .lock_exclusive()
                 .all(&txn)
                 .await?;
 
-            for purchase in purchases {
+            for event in events {
                 if remaining == 0 {
                     break;
                 }
 
-                let available = purchase.remaining();
+                let available = event.remaining();
                 if available > 0 {
                     let to_consume = remaining.min(available);
 
                     // Update consumed count
-                    let mut purchase_active: entity::credit_purchases::ActiveModel =
-                        purchase.into();
-                    let current_consumed = purchase_active.consumed.as_ref().to_owned();
-                    purchase_active.consumed = Set(current_consumed + to_consume);
-                    purchase_active.update(&txn).await?;
+                    let mut event_active: entity::credits_events::ActiveModel = event.into();
+                    let current_consumed = event_active.consumed.as_ref().to_owned();
+                    event_active.consumed = Set(current_consumed + to_consume);
+                    event_active.update(&txn).await?;
 
                     consumed_from_extra += to_consume;
                     remaining -= to_consume;
@@ -449,11 +534,11 @@ impl CreditsService {
             .iter()
             .map(|p| CreditPurchaseRecord {
                 transaction_id: p.transaction_id.clone(),
-                product_id: p.product_id.clone(),
+                product_id: p.product_id.clone().unwrap_or_default(),
                 amount: p.amount,
                 consumed: p.consumed,
                 remaining: p.remaining(),
-                purchase_date: p.purchase_date,
+                purchase_date: p.occurred_at,
             })
             .collect();
 

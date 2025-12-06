@@ -168,14 +168,12 @@ impl QuotaService {
         let status = self.check_quota(user_id, tier).await?;
 
         // Query total purchased credits
-        let total_purchased = entity::credit_purchases::Entity::find()
-            .filter(entity::credit_purchases::Column::UserId.eq(user_id))
-            .filter(entity::credit_purchases::Column::RevokedAt.is_null())
+        let total_purchased = entity::credits_events::Entity::find()
+            .filter(entity::credits_events::Column::UserId.eq(user_id))
+            .filter(entity::credits_events::Column::RevokedAt.is_null())
+            .filter(entity::credits_events::Column::EventType.ne("consumption"))
             .select_only()
-            .column_as(
-                entity::credit_purchases::Column::Amount.sum(),
-                "total_amount",
-            )
+            .column_as(entity::credits_events::Column::Amount.sum(), "total_amount")
             .into_tuple::<Option<i32>>()
             .one(&self.db)
             .await?
@@ -237,7 +235,7 @@ impl QuotaService {
     }
 
     /// Helper: Get or create credit balance for a user
-    /// IMPORTANT: When creating, syncs extra credits from credit_purchases
+    /// IMPORTANT: When creating, syncs extra credits from credits_events
     async fn get_or_create_credit_balance(
         &self,
         user_id: Uuid,
@@ -252,15 +250,16 @@ impl QuotaService {
             return Ok(balance);
         }
 
-        // Calculate extra credits from purchases
-        // This handles the case where user bought credits BEFORE first quota check
-        let purchases = entity::credit_purchases::Entity::find()
-            .filter(entity::credit_purchases::Column::UserId.eq(user_id))
-            .filter(entity::credit_purchases::Column::RevokedAt.is_null())
+        // Calculate extra credits from ledger events
+        // This handles the case where user received credits BEFORE first quota check
+        let events = entity::credits_events::Entity::find()
+            .filter(entity::credits_events::Column::UserId.eq(user_id))
+            .filter(entity::credits_events::Column::RevokedAt.is_null())
+            .filter(entity::credits_events::Column::EventType.ne("consumption"))
             .all(&self.db)
             .await?;
 
-        let extra_credits: i32 = purchases.iter().map(|p| p.amount - p.consumed).sum();
+        let extra_credits: i32 = events.iter().map(|p| p.amount - p.consumed).sum();
 
         // Create initial balance on first request
         let now = time::OffsetDateTime::now_utc();
@@ -301,7 +300,7 @@ impl QuotaService {
     }
 
     /// Helper: Find and lock credit balance for update (within transaction)
-    /// IMPORTANT: When creating, syncs extra credits from credit_purchases
+    /// IMPORTANT: When creating, syncs extra credits from credits_events
     async fn find_and_lock_credit_balance(
         &self,
         user_id: Uuid,
@@ -319,15 +318,16 @@ impl QuotaService {
             return Ok(balance);
         }
 
-        // Calculate extra credits from purchases
-        // This handles the case where user bought credits BEFORE first quota check
-        let purchases = entity::credit_purchases::Entity::find()
-            .filter(entity::credit_purchases::Column::UserId.eq(user_id))
-            .filter(entity::credit_purchases::Column::RevokedAt.is_null())
+        // Calculate extra credits from ledger events
+        // This handles the case where user received credits BEFORE first quota check
+        let events = entity::credits_events::Entity::find()
+            .filter(entity::credits_events::Column::UserId.eq(user_id))
+            .filter(entity::credits_events::Column::RevokedAt.is_null())
+            .filter(entity::credits_events::Column::EventType.ne("consumption"))
             .all(txn)
             .await?;
 
-        let extra_credits: i32 = purchases.iter().map(|p| p.amount - p.consumed).sum();
+        let extra_credits: i32 = events.iter().map(|p| p.amount - p.consumed).sum();
 
         // If not found, insert (no-op if another transaction races) then re-lock
         let now = time::OffsetDateTime::now_utc();

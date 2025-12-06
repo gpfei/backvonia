@@ -4,19 +4,30 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
-#[sea_orm(table_name = "welcome_bonuses")]
+#[sea_orm(table_name = "credits_events")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
-    #[sea_orm(unique)]
     pub user_id: Uuid,
+    pub event_type: String,
+    pub original_transaction_id: Option<String>,
     #[sea_orm(unique)]
-    pub device_id: String,
-    pub provider: String,
-    pub provider_user_id: String,
-    pub amount_granted: i32,
-    pub reason: String,
-    pub granted_at: TimeDateTimeWithTimeZone,
+    pub transaction_id: String,
+    pub product_id: Option<String>,
+    pub platform: Option<String>,
+    pub amount: i32,
+    pub consumed: i32,
+    pub occurred_at: TimeDateTimeWithTimeZone,
+    pub verified_at: TimeDateTimeWithTimeZone,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub receipt_data: Option<String>,
+    pub revoked_at: Option<TimeDateTimeWithTimeZone>,
+    pub revoked_reason: Option<String>,
+    pub device_id: Option<String>,
+    pub provider: Option<String>,
+    pub provider_user_id: Option<String>,
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub metadata: Option<Json>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
