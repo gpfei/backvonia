@@ -820,7 +820,7 @@ components:
           description: >
             "prose" for full textual continuation, "ideas" for high-level branch or continuation ideas.
           default: prose
-        story_context:
+        storyContext:
           type: object
           properties:
             title:
@@ -832,7 +832,7 @@ components:
             language:
               type: string
               example: en
-        path_nodes:
+        pathNodes:
           type: array
           items:
             type: object
@@ -841,25 +841,25 @@ components:
                 type: string
               content:
                 type: string
-        generation_params:
+        generationParams:
           type: object
           properties:
-            num_candidates:
+            numCandidates:
               type: integer
               default: 3
-            min_words:
+            minWords:
               type: integer
               default: 80
-            max_words:
+            maxWords:
               type: integer
               default: 200
             tone:
               type: string
               description: e.g. "neutral", "dark"
-            avoid_hard_end:
+            avoidHardEnd:
               type: boolean
               default: true
-      required: [story_context, path_nodes]
+      required: [storyContext, pathNodes]
 
     AITextContinueMode:
       type: string
@@ -903,7 +903,7 @@ components:
       properties:
         mode:
           $ref: '#/components/schemas/AITextEditMode'
-        story_context:
+        storyContext:
           type: object
           nullable: true
           properties:
@@ -928,10 +928,10 @@ components:
               type: string
               nullable: true
               description: Optional selected substring; if null, apply to whole text.
-        edit_params:
+        editParams:
           type: object
           properties:
-            target_length:
+            targetLength:
               type: string
               enum: [shorter, similar, longer]
             tone:
@@ -940,7 +940,7 @@ components:
             language:
               type: string
               description: Override language if needed
-            keep_style:
+            keepStyle:
               type: boolean
               description: Try to keep original style when rewriting.
       required: [mode, input]
@@ -970,7 +970,7 @@ components:
     AIImageGenerateRequest:
       type: object
       properties:
-        story_context:
+        storyContext:
           type: object
           properties:
             title:
@@ -988,7 +988,7 @@ components:
               type: array
               items:
                 type: string
-        image_params:
+        imageParams:
           type: object
           properties:
             style:
@@ -1000,7 +1000,7 @@ components:
             resolution:
               type: string
               description: e.g. "low", "medium", "high"
-      required: [story_context, node]
+      required: [storyContext, node]
 
     GeneratedImage:
       type: object
