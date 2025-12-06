@@ -107,43 +107,48 @@ impl IAPService {
             .as_ref()
             .and_then(|txns| txns.first());
 
-        let (original_transaction_id, product_id, expires_date_ms, is_family_shared, subscription_status) =
-            if let Some(transaction) = transaction_opt {
-                // Extract family sharing status
-                let is_family_shared = transaction
-                    .in_app_ownership_type
-                    .as_deref()
-                    .map(|t| t == "FAMILY_SHARED")
-                    .unwrap_or(false);
+        let (
+            original_transaction_id,
+            product_id,
+            expires_date_ms,
+            is_family_shared,
+            subscription_status,
+        ) = if let Some(transaction) = transaction_opt {
+            // Extract family sharing status
+            let is_family_shared = transaction
+                .in_app_ownership_type
+                .as_deref()
+                .map(|t| t == "FAMILY_SHARED")
+                .unwrap_or(false);
 
-                // Determine subscription status
-                let subscription_status = Self::determine_subscription_status(
-                    transaction.expires_date_ms.as_deref(),
-                    transaction.cancellation_date_ms.as_deref(),
-                    transaction.is_in_billing_retry_period.as_deref(),
-                );
+            // Determine subscription status
+            let subscription_status = Self::determine_subscription_status(
+                transaction.expires_date_ms.as_deref(),
+                transaction.cancellation_date_ms.as_deref(),
+                transaction.is_in_billing_retry_period.as_deref(),
+            );
 
-                (
-                    transaction.original_transaction_id.clone(),
-                    Some(transaction.product_id.clone()),
-                    transaction.expires_date_ms.clone(),
-                    is_family_shared,
-                    subscription_status,
-                )
-            } else if let Some(receipt) = &apple_response.receipt {
-                // No transaction info - likely a non-subscription purchase
-                (
-                    receipt.original_transaction_id.clone(),
-                    receipt.product_id.clone(),
-                    None,
-                    false, // No family sharing info available
-                    None,  // No subscription status for non-subscriptions
-                )
-            } else {
-                return Err(ApiError::InvalidReceipt(
-                    "No receipt or transaction found".to_string(),
-                ));
-            };
+            (
+                transaction.original_transaction_id.clone(),
+                Some(transaction.product_id.clone()),
+                transaction.expires_date_ms.clone(),
+                is_family_shared,
+                subscription_status,
+            )
+        } else if let Some(receipt) = &apple_response.receipt {
+            // No transaction info - likely a non-subscription purchase
+            (
+                receipt.original_transaction_id.clone(),
+                receipt.product_id.clone(),
+                None,
+                false, // No family sharing info available
+                None,  // No subscription status for non-subscriptions
+            )
+        } else {
+            return Err(ApiError::InvalidReceipt(
+                "No receipt or transaction found".to_string(),
+            ));
+        };
 
         // Determine tier based on product_id
         let purchase_tier = match product_id.as_deref() {

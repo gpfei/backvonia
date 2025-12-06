@@ -11,13 +11,13 @@ use entity::{
     sea_orm_active_enums::{AccountTier, UserStatus},
     user_auth_methods, users,
 };
-use jsonwebtoken::{decode, decode_header, jwk::JwkSet, DecodingKey, Validation, Algorithm};
+use jsonwebtoken::{decode, decode_header, jwk::JwkSet, Algorithm, DecodingKey, Validation};
 use sea_orm::{entity::*, query::*, sea_query::Expr, ActiveValue::Set, DatabaseConnection};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use time::OffsetDateTime;
 use tokio::sync::RwLock;
-use tracing::{info, warn, debug};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 /// Apple's JWKS endpoint
@@ -75,7 +75,7 @@ pub struct WelcomeBonusInfo {
 pub struct AuthTokens {
     pub access_token: String,
     pub refresh_token: String,
-    pub expires_in: u64,  // Access token expiration in seconds
+    pub expires_in: u64, // Access token expiration in seconds
     pub user: UserInfo,
     pub welcome_bonus: Option<WelcomeBonusInfo>,
 }
@@ -375,16 +375,21 @@ impl AuthService {
         let header = decode_header(id_token)
             .map_err(|e| ApiError::InvalidToken(format!("Invalid JWT header: {}", e)))?;
 
-        let kid = header.kid
+        let kid = header
+            .kid
             .ok_or_else(|| ApiError::InvalidToken("Missing key ID in token header".to_string()))?;
 
         // 2. Get Apple's JWKS (cached)
         let jwks = self.get_apple_jwks().await?;
 
         // 3. Find the matching key
-        let jwk = jwks.keys.iter()
+        let jwk = jwks
+            .keys
+            .iter()
             .find(|k| k.common.key_id.as_ref() == Some(&kid))
-            .ok_or_else(|| ApiError::InvalidToken(format!("Key ID '{}' not found in Apple's JWKS", kid)))?;
+            .ok_or_else(|| {
+                ApiError::InvalidToken(format!("Key ID '{}' not found in Apple's JWKS", kid))
+            })?;
 
         // 4. Create decoding key from JWK
         let decoding_key = DecodingKey::from_jwk(jwk)
@@ -398,9 +403,7 @@ impl AuthService {
         // 6. Decode and validate
         let token_data = decode::<AppleIdTokenPayload>(id_token, &decoding_key, &validation)
             .map_err(|e| match e.kind() {
-                jsonwebtoken::errors::ErrorKind::ExpiredSignature => {
-                    ApiError::ExpiredToken
-                }
+                jsonwebtoken::errors::ErrorKind::ExpiredSignature => ApiError::ExpiredToken,
                 jsonwebtoken::errors::ErrorKind::InvalidIssuer => {
                     ApiError::InvalidToken("Invalid token issuer".to_string())
                 }
@@ -436,9 +439,9 @@ impl AuthService {
 
         // Fetch fresh JWKS
         debug!("Fetching Apple JWKS from {}", APPLE_JWKS_URL);
-        let response = reqwest::get(APPLE_JWKS_URL)
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("Failed to fetch Apple JWKS: {}", e)))?;
+        let response = reqwest::get(APPLE_JWKS_URL).await.map_err(|e| {
+            ApiError::Internal(anyhow::anyhow!("Failed to fetch Apple JWKS: {}", e))
+        })?;
 
         if !response.status().is_success() {
             return Err(ApiError::Internal(anyhow::anyhow!(
@@ -447,10 +450,9 @@ impl AuthService {
             )));
         }
 
-        let jwks: JwkSet = response
-            .json()
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!("Failed to parse Apple JWKS: {}", e)))?;
+        let jwks: JwkSet = response.json().await.map_err(|e| {
+            ApiError::Internal(anyhow::anyhow!("Failed to parse Apple JWKS: {}", e))
+        })?;
 
         // Update cache
         {

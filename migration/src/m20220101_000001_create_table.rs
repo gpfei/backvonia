@@ -1,5 +1,5 @@
-use sea_orm_migration::{prelude::*, schema::*};
 use sea_orm_migration::sea_query::extension::postgres::Type;
+use sea_orm_migration::{prelude::*, schema::*};
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -257,7 +257,11 @@ impl MigrationTrait for Migration {
                     .col(uuid(UserIapReceipts::UserId).not_null())
                     .col(string(UserIapReceipts::OriginalTransactionId).not_null())
                     .col(string(UserIapReceipts::Platform).not_null())
-                    .col(boolean(UserIapReceipts::IsFamilyShared).default(false).not_null())
+                    .col(
+                        boolean(UserIapReceipts::IsFamilyShared)
+                            .default(false)
+                            .not_null(),
+                    )
                     .col(uuid_null(UserIapReceipts::FamilyPrimaryUserId))
                     .col(string(UserIapReceipts::ProductId).not_null())
                     .col(
@@ -422,7 +426,11 @@ impl MigrationTrait for Migration {
                     .if_not_exists()
                     .col(pk_uuid(IapReceiptCache::Id))
                     .col(uuid_null(IapReceiptCache::UserId))
-                    .col(string(IapReceiptCache::OriginalTransactionId).unique_key().not_null())
+                    .col(
+                        string(IapReceiptCache::OriginalTransactionId)
+                            .unique_key()
+                            .not_null(),
+                    )
                     .col(string(IapReceiptCache::Platform).not_null())
                     .col(
                         ColumnDef::new(IapReceiptCache::PurchaseTier)

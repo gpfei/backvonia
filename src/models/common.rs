@@ -1,39 +1,13 @@
 use serde::{Deserialize, Serialize};
 
-/// Generic success response wrapper used across all API endpoints
-///
-/// Provides a consistent response format:
-/// ```json
-/// {
-///   "success": true,
-///   "data": { ... }
-/// }
-/// ```
+/// Simple message response for lightweight endpoints (e.g., logout)
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SuccessResponse<T> {
-    pub success: bool,
-    pub data: T,
-}
-
-impl<T> SuccessResponse<T> {
-    /// Create a new success response with the given data
-    pub fn new(data: T) -> Self {
-        Self {
-            success: true,
-            data,
-        }
-    }
-}
-
-/// Helper wrapper for message-only responses (e.g., logout success)
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MessageData {
+pub struct MessageResponse {
     pub message: String,
 }
 
-impl MessageData {
+impl MessageResponse {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -41,12 +15,27 @@ impl MessageData {
     }
 }
 
-/// Error response structure
+/// Error response structure (paired with non-2xx HTTP status codes)
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ErrorResponse {
-    pub success: bool,
     pub error: ErrorObject,
+}
+
+impl ErrorResponse {
+    pub fn new(
+        code: impl Into<String>,
+        message: impl Into<String>,
+        details: Option<serde_json::Value>,
+    ) -> Self {
+        Self {
+            error: ErrorObject {
+                code: code.into(),
+                message: message.into(),
+                details,
+            },
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]

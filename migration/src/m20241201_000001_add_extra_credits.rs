@@ -153,7 +153,7 @@ enum Users {
 enum CreditPurchases {
     Table,
     Id,
-    UserId,  // Changed from LocalUserId
+    UserId, // Changed from LocalUserId
     OriginalTransactionId,
     TransactionId,
     ProductId,

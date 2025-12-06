@@ -86,7 +86,9 @@ impl QuotaService {
             .await?;
 
         // 2. Check subscription reset
-        let balance = self.reset_subscription_if_needed_tx(balance, tier, &txn).await?;
+        let balance = self
+            .reset_subscription_if_needed_tx(balance, tier, &txn)
+            .await?;
 
         // 3. Calculate total available
         let total_available = balance.subscription_credits + balance.extra_credits_remaining;
@@ -95,7 +97,10 @@ impl QuotaService {
             txn.rollback().await?;
             return Err(ApiError::QuotaExceeded(format!(
                 "Insufficient credits: need {}, have {} (subscription: {}, extra: {})",
-                cost, total_available, balance.subscription_credits, balance.extra_credits_remaining
+                cost,
+                total_available,
+                balance.subscription_credits,
+                balance.extra_credits_remaining
             )));
         }
 
@@ -191,11 +196,7 @@ impl QuotaService {
     }
 
     /// Get quota subset for AI API responses (DEPRECATED - quota no longer returned in AI responses)
-    pub async fn get_quota_subset(
-        &self,
-        user_id: Uuid,
-        tier: &AccountTier,
-    ) -> Result<QuotaSubset> {
+    pub async fn get_quota_subset(&self, user_id: Uuid, tier: &AccountTier) -> Result<QuotaSubset> {
         let status = self.check_quota(user_id, tier).await?;
 
         Ok(QuotaSubset {
@@ -259,10 +260,7 @@ impl QuotaService {
             .all(&self.db)
             .await?;
 
-        let extra_credits: i32 = purchases
-            .iter()
-            .map(|p| p.amount - p.consumed)
-            .sum();
+        let extra_credits: i32 = purchases.iter().map(|p| p.amount - p.consumed).sum();
 
         // Create initial balance on first request
         let now = time::OffsetDateTime::now_utc();
@@ -329,10 +327,7 @@ impl QuotaService {
             .all(txn)
             .await?;
 
-        let extra_credits: i32 = purchases
-            .iter()
-            .map(|p| p.amount - p.consumed)
-            .sum();
+        let extra_credits: i32 = purchases.iter().map(|p| p.amount - p.consumed).sum();
 
         // If not found, insert (no-op if another transaction races) then re-lock
         let now = time::OffsetDateTime::now_utc();
@@ -386,8 +381,7 @@ impl QuotaService {
                 let monthly_allocation = self.get_monthly_allocation(tier);
                 let next_reset = now + time::Duration::days(30);
 
-                let mut balance_active: entity::user_credit_balance::ActiveModel =
-                    balance.into();
+                let mut balance_active: entity::user_credit_balance::ActiveModel = balance.into();
                 balance_active.subscription_credits = Set(monthly_allocation);
                 balance_active.subscription_resets_at = Set(Some(next_reset));
                 balance_active.last_updated = Set(now);
@@ -422,8 +416,7 @@ impl QuotaService {
                 let monthly_allocation = self.get_monthly_allocation(tier);
                 let next_reset = now + time::Duration::days(30);
 
-                let mut balance_active: entity::user_credit_balance::ActiveModel =
-                    balance.into();
+                let mut balance_active: entity::user_credit_balance::ActiveModel = balance.into();
                 balance_active.subscription_credits = Set(monthly_allocation);
                 balance_active.subscription_resets_at = Set(Some(next_reset));
                 balance_active.last_updated = Set(now);

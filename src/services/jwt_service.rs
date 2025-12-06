@@ -60,17 +60,13 @@ impl JWTService {
 
     /// Validate and decode a JWT token
     pub fn validate_token(&self, token: &str) -> Result<Claims> {
-        let token_data = decode::<Claims>(
-            token,
-            &self.decoding_key,
-            &Validation::default(),
-        )
-        .map_err(|e| match e.kind() {
-            jsonwebtoken::errors::ErrorKind::ExpiredSignature => {
-                crate::error::ApiError::ExpiredToken
-            }
-            _ => crate::error::ApiError::InvalidToken(e.to_string()),
-        })?;
+        let token_data = decode::<Claims>(token, &self.decoding_key, &Validation::default())
+            .map_err(|e| match e.kind() {
+                jsonwebtoken::errors::ErrorKind::ExpiredSignature => {
+                    crate::error::ApiError::ExpiredToken
+                }
+                _ => crate::error::ApiError::InvalidToken(e.to_string()),
+            })?;
 
         Ok(token_data.claims)
     }

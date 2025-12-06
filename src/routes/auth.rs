@@ -7,10 +7,10 @@ use crate::{
     middleware::UserIdentity,
     models::{
         auth::{
-            AppleSignInRequest, AuthData, AuthResponse, LogoutRequest, LogoutResponse, MeResponse,
-            RefreshTokenData, RefreshTokenRequest, RefreshTokenResponse, UserResponse,
+            AppleSignInRequest, AuthResponse, LogoutRequest, LogoutResponse, MeResponse,
+            RefreshTokenRequest, RefreshTokenResponse, UserResponse,
         },
-        common::{MessageData, SuccessResponse},
+        common::MessageResponse,
     },
 };
 
@@ -34,23 +34,20 @@ use crate::{
 /// Response:
 /// ```json
 /// {
-///   "success": true,
-///   "data": {
-///     "accessToken": "eyJ...",
-///     "refreshToken": "550e8400-...",
-///     "expiresIn": 900,
-///     "user": {
-///       "userId": "...",
-///       "email": "user@privaterelay.appleid.com",
-///       "fullName": "John Doe",
-///       "status": "active",
-///       "accountTier": "free",
-///       "createdAt": "2024-12-04T00:00:00Z"
-///     },
-///     "welcomeBonus": {
-///       "granted": true,
-///       "amount": 5
-///     }
+///   "accessToken": "eyJ...",
+///   "refreshToken": "550e8400-...",
+///   "expiresIn": 900,
+///   "user": {
+///     "userId": "...",
+///     "email": "user@privaterelay.appleid.com",
+///     "fullName": "John Doe",
+///     "status": "active",
+///     "accountTier": "free",
+///     "createdAt": "2024-12-04T00:00:00Z"
+///   },
+///   "welcomeBonus": {
+///     "granted": true,
+///     "amount": 5
 ///   }
 /// }
 /// ```
@@ -70,13 +67,13 @@ pub async fn apple_sign_in(
         .authenticate_with_apple(&request.id_token, request.full_name, device_info)
         .await?;
 
-    Ok(Json(SuccessResponse::new(AuthData {
+    Ok(Json(AuthResponse {
         access_token: auth_tokens.access_token,
         refresh_token: auth_tokens.refresh_token,
         expires_in: auth_tokens.expires_in,
         user: auth_tokens.user.into(),
         welcome_bonus: auth_tokens.welcome_bonus.map(|b| b.into()),
-    })))
+    }))
 }
 
 /// POST /api/v1/auth/refresh
@@ -93,11 +90,8 @@ pub async fn apple_sign_in(
 /// Response:
 /// ```json
 /// {
-///   "success": true,
-///   "data": {
-///     "accessToken": "eyJ...",
-///     "expiresIn": 900
-///   }
+///   "accessToken": "eyJ...",
+///   "expiresIn": 900
 /// }
 /// ```
 #[instrument(skip(state, request))]
@@ -111,10 +105,10 @@ pub async fn refresh_token(
         .refresh_access_token(&request.refresh_token)
         .await?;
 
-    Ok(Json(SuccessResponse::new(RefreshTokenData {
+    Ok(Json(RefreshTokenResponse {
         access_token,
         expires_in,
-    })))
+    }))
 }
 
 /// POST /api/v1/auth/logout
@@ -131,7 +125,6 @@ pub async fn refresh_token(
 /// Response:
 /// ```json
 /// {
-///   "success": true,
 ///   "message": "Logged out successfully"
 /// }
 /// ```
@@ -141,14 +134,9 @@ pub async fn logout(
     Json(request): Json<LogoutRequest>,
 ) -> Result<Json<LogoutResponse>> {
     // Revoke the refresh token
-    state
-        .auth_service
-        .logout(&request.refresh_token)
-        .await?;
+    state.auth_service.logout(&request.refresh_token).await?;
 
-    Ok(Json(SuccessResponse::new(MessageData::new(
-        "Logged out successfully",
-    ))))
+    Ok(Json(MessageResponse::new("Logged out successfully")))
 }
 
 /// POST /api/v1/auth/logout-all
@@ -160,7 +148,6 @@ pub async fn logout(
 /// Response:
 /// ```json
 /// {
-///   "success": true,
 ///   "message": "Logged out from 3 devices"
 /// }
 /// ```
@@ -170,15 +157,12 @@ pub async fn logout_all(
     identity: UserIdentity,
 ) -> Result<Json<LogoutResponse>> {
     // Revoke all refresh tokens for user
-    let revoked_count = state
-        .auth_service
-        .logout_all(identity.user_id)
-        .await?;
+    let revoked_count = state.auth_service.logout_all(identity.user_id).await?;
 
-    Ok(Json(SuccessResponse::new(MessageData::new(format!(
+    Ok(Json(MessageResponse::new(format!(
         "Logged out from {} device(s)",
         revoked_count
-    )))))
+    ))))
 }
 
 /// GET /api/v1/auth/me
@@ -190,15 +174,12 @@ pub async fn logout_all(
 /// Response:
 /// ```json
 /// {
-///   "success": true,
-///   "data": {
-///     "userId": "...",
-///     "email": "user@privaterelay.appleid.com",
-///     "fullName": "John Doe",
-///     "status": "active",
-///     "accountTier": "pro",
-///     "createdAt": "2024-12-04T00:00:00Z"
-///   }
+///   "userId": "...",
+///   "email": "user@privaterelay.appleid.com",
+///   "fullName": "John Doe",
+///   "status": "active",
+///   "accountTier": "pro",
+///   "createdAt": "2024-12-04T00:00:00Z"
 /// }
 /// ```
 #[instrument(skip(state))]
@@ -209,5 +190,5 @@ pub async fn get_me(
     // Get user info
     let user_info = state.auth_service.get_user(identity.user_id).await?;
 
-    Ok(Json(SuccessResponse::new(UserResponse::from(user_info))))
+    Ok(Json(UserResponse::from(user_info)))
 }

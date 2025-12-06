@@ -94,9 +94,7 @@ impl CreditsService {
         }
 
         // Successfully inserted - recalculate totals
-        let total_extra = self
-            .recalculate_extra_credits_txn(user_id, &txn)
-            .await?;
+        let total_extra = self.recalculate_extra_credits_txn(user_id, &txn).await?;
         txn.commit().await?;
 
         info!(
@@ -174,9 +172,7 @@ impl CreditsService {
         }
 
         // Successfully inserted - recalculate totals
-        let total_extra = self
-            .recalculate_extra_credits_txn(user_id, txn)
-            .await?;
+        let total_extra = self.recalculate_extra_credits_txn(user_id, txn).await?;
 
         info!(
             "Recorded credit purchase in txn: user={}, transaction={}, amount={}, total_extra={}",
@@ -387,8 +383,7 @@ impl CreditsService {
         }
 
         // 4. Recalculate total extra credits
-        self.recalculate_extra_credits_txn(user_id, &txn)
-            .await?;
+        self.recalculate_extra_credits_txn(user_id, &txn).await?;
 
         txn.commit().await?;
 
@@ -407,11 +402,7 @@ impl CreditsService {
     /// Check if user has sufficient credits
     /// CRITICAL FIX: Now reads from user_credit_balance
     #[instrument(skip(self))]
-    pub async fn check_sufficient_credits(
-        &self,
-        user_id: Uuid,
-        required: i32,
-    ) -> Result<bool> {
+    pub async fn check_sufficient_credits(&self, user_id: Uuid, required: i32) -> Result<bool> {
         // Read from user_credit_balance (accurate balance)
         let balance = entity::user_credit_balance::Entity::find()
             .filter(entity::user_credit_balance::Column::UserId.eq(user_id))

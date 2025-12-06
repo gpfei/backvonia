@@ -7,11 +7,11 @@ use crate::{
     middleware::UserIdentity,
     models::{
         ai::{
-            AIImageGenerateData, AIImageGenerateRequest, AIImageGenerateResponse,
-            AITextContinueData, AITextContinueMode, AITextContinueRequest, AITextContinueResponse,
-            AITextEditData, AITextEditMode, AITextEditRequest, AITextEditResponse,
+            AIImageGenerateRequest, AIImageGenerateResponse, AITextContinueMode,
+            AITextContinueRequest, AITextContinueResponse, AITextEditMode, AITextEditRequest,
+            AITextEditResponse,
         },
-        common::{AIOperation, SuccessResponse},
+        common::AIOperation,
     },
 };
 
@@ -53,7 +53,7 @@ pub async fn text_continue(
         )
         .await?;
 
-    Ok(Json(SuccessResponse::new(AITextContinueData { candidates })))
+    Ok(Json(AITextContinueResponse { candidates }))
 }
 
 /// POST /api/v1/ai/image/generate
@@ -83,7 +83,7 @@ pub async fn image_generate(
         .generate_image(&request.story_context, &request.node, &request.image_params)
         .await?;
 
-    Ok(Json(SuccessResponse::new(AIImageGenerateData { image })))
+    Ok(Json(AIImageGenerateResponse { image }))
 }
 
 /// POST /api/v1/ai/text/edit
@@ -126,8 +126,8 @@ pub async fn text_edit(
         )
         .await?;
 
-    Ok(Json(SuccessResponse::new(AITextEditData {
+    Ok(Json(AITextEditResponse {
         mode: request.mode,
         candidates,
-    })))
+    }))
 }

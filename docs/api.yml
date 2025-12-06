@@ -545,13 +545,7 @@ components:
       required: [platform, deviceId]
 
     AuthResponse:
-      type: object
-      properties:
-        success:
-          type: boolean
-          example: true
-        data:
-          $ref: '#/components/schemas/AuthData'
+      $ref: '#/components/schemas/AuthData'
 
     AuthData:
       type: object
@@ -617,17 +611,11 @@ components:
     RefreshTokenResponse:
       type: object
       properties:
-        success:
-          type: boolean
-          example: true
-        data:
-          type: object
-          properties:
-            accessToken:
-              type: string
-            expiresIn:
-              type: integer
-              example: 900
+        accessToken:
+          type: string
+        expiresIn:
+          type: integer
+          example: 900
 
     LogoutRequest:
       type: object
@@ -639,40 +627,19 @@ components:
     LogoutResponse:
       type: object
       properties:
-        success:
-          type: boolean
-          example: true
         message:
           type: string
           example: "Logged out successfully"
 
     MeResponse:
-      type: object
-      properties:
-        success:
-          type: boolean
-          example: true
-        data:
-          $ref: '#/components/schemas/UserResponse'
+      $ref: '#/components/schemas/UserResponse'
 
     # =============================================================================
     # Generic Schemas
     # =============================================================================
-    SuccessWrapper:
-      type: object
-      properties:
-        success:
-          type: boolean
-          example: true
-        data:
-          type: object
-
     ErrorResponse:
       type: object
       properties:
-        success:
-          type: boolean
-          example: false
         error:
           $ref: '#/components/schemas/ErrorObject'
 
@@ -705,43 +672,31 @@ components:
     IAPLinkResponse:
       type: object
       properties:
-        success:
-          type: boolean
-          example: true
-        data:
-          type: object
-          properties:
-            accountTier:
-              type: string
-              enum: [free, pro]
-            productId:
-              type: string
-              nullable: true
-            validUntil:
-              type: string
-              format: date-time
-              nullable: true
+        accountTier:
+          type: string
+          enum: [free, pro]
+        productId:
+          type: string
+          nullable: true
+        validUntil:
+          type: string
+          format: date-time
+          nullable: true
 
     CreditsQuotaResponse:
       type: object
       properties:
-        success:
-          type: boolean
-          example: true
-        data:
-          type: object
-          properties:
-            accountTier:
-              type: string
-              enum: [free, pro]
-            subscriptionCredits:
-              $ref: '#/components/schemas/SubscriptionCreditsInfo'
-            extraCredits:
-              $ref: '#/components/schemas/ExtraCreditsInfo'
-            totalCredits:
-              type: integer
-              description: Total remaining credits (subscription + extra)
-              example: 750
+        accountTier:
+          type: string
+          enum: [free, pro]
+        subscriptionCredits:
+          $ref: '#/components/schemas/SubscriptionCreditsInfo'
+        extraCredits:
+          $ref: '#/components/schemas/ExtraCreditsInfo'
+        totalCredits:
+          type: integer
+          description: Total remaining credits (subscription + extra)
+          example: 750
 
     SubscriptionCreditsInfo:
       type: object
@@ -830,24 +785,18 @@ components:
     CreditPurchaseResponse:
       type: object
       properties:
-        success:
-          type: boolean
-          example: true
-        data:
-          type: object
-          properties:
-            creditsAdded:
-              type: integer
-              description: Credits added from this purchase
-            totalExtraCredits:
-              type: integer
-              description: Total extra credits after purchase
-            purchaseId:
-              type: string
-              format: uuid
-              description: Internal purchase record ID
-            quota:
-              $ref: '#/components/schemas/CreditsQuotaInfo'
+        creditsAdded:
+          type: integer
+          description: Credits added from this purchase
+        totalExtraCredits:
+          type: integer
+          description: Total extra credits after purchase
+        purchaseId:
+          type: string
+          format: uuid
+          description: Internal purchase record ID
+        quota:
+          $ref: '#/components/schemas/CreditsQuotaInfo'
 
     CreditsQuotaInfo:
       type: object
@@ -936,16 +885,10 @@ components:
     AITextContinueResponse:
       type: object
       properties:
-        success:
-          type: boolean
-          example: true
-        data:
-          type: object
-          properties:
-            candidates:
-              type: array
-              items:
-                $ref: '#/components/schemas/AITextCandidate'
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/AITextCandidate'
 
     AITextEditMode:
       type: string
@@ -1017,18 +960,12 @@ components:
     AITextEditResponse:
       type: object
       properties:
-        success:
-          type: boolean
-          example: true
-        data:
-          type: object
-          properties:
-            mode:
-              $ref: '#/components/schemas/AITextEditMode'
-            candidates:
-              type: array
-              items:
-                $ref: '#/components/schemas/AITextEditCandidate'
+        mode:
+          $ref: '#/components/schemas/AITextEditMode'
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/AITextEditCandidate'
 
     AIImageGenerateRequest:
       type: object
@@ -1082,11 +1019,5 @@ components:
     AIImageGenerateResponse:
       type: object
       properties:
-        success:
-          type: boolean
-          example: true
-        data:
-          type: object
-          properties:
-            image:
-              $ref: '#/components/schemas/GeneratedImage'
+        image:
+          $ref: '#/components/schemas/GeneratedImage'

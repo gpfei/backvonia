@@ -1,108 +1,90 @@
-/// Test backward compatibility of GET /quota endpoint
-///
-/// This test verifies that the original /quota endpoint maintains its response schema
-/// for existing mobile clients while the new /quota/credits endpoint provides extended information.
-
+/// Document the response schemas of the quota endpoints after removing legacy wrappers.
 #[cfg(test)]
 mod backward_compatibility_tests {
     use serde_json::Value;
 
     #[test]
     fn test_quota_response_schema() {
-        // Original /quota endpoint should return:
+        // Original /quota endpoint should return top-level fields without a wrapper.
         // {
-        //   "success": true,
-        //   "data": {
-        //     "purchaseTier": "pro",
-        //     "quota": {
-        //       "textLimitDaily": 1000,
-        //       "textUsedToday": 10,
-        //       "textRemainingToday": 990,
-        //       "imageLimitDaily": 50,
-        //       "imageUsedToday": 2,
-        //       "imageRemainingToday": 48
-        //     }
+        //   "purchaseTier": "pro",
+        //   "quota": {
+        //     "textLimitDaily": 1000,
+        //     "textUsedToday": 10,
+        //     "textRemainingToday": 990,
+        //     "imageLimitDaily": 50,
+        //     "imageUsedToday": 2,
+        //     "imageRemainingToday": 48
         //   }
         // }
 
         let original_schema = r#"{
-            "success": true,
-            "data": {
-                "purchaseTier": "pro",
-                "quota": {
-                    "textLimitDaily": 1000,
-                    "textUsedToday": 10,
-                    "textRemainingToday": 990,
-                    "imageLimitDaily": 50,
-                    "imageUsedToday": 2,
-                    "imageRemainingToday": 48
-                }
+            "purchaseTier": "pro",
+            "quota": {
+                "textLimitDaily": 1000,
+                "textUsedToday": 10,
+                "textRemainingToday": 990,
+                "imageLimitDaily": 50,
+                "imageUsedToday": 2,
+                "imageRemainingToday": 48
             }
         }"#;
 
         let parsed: Value = serde_json::from_str(original_schema).unwrap();
 
         // Verify required fields exist
-        assert_eq!(parsed["success"], true);
-        assert!(parsed["data"]["purchaseTier"].is_string());
-        assert!(parsed["data"]["quota"].is_object());
-        assert!(parsed["data"]["quota"]["textLimitDaily"].is_number());
-        assert!(parsed["data"]["quota"]["textUsedToday"].is_number());
-        assert!(parsed["data"]["quota"]["textRemainingToday"].is_number());
-        assert!(parsed["data"]["quota"]["imageLimitDaily"].is_number());
-        assert!(parsed["data"]["quota"]["imageUsedToday"].is_number());
-        assert!(parsed["data"]["quota"]["imageRemainingToday"].is_number());
+        assert!(parsed["purchaseTier"].is_string());
+        assert!(parsed["quota"].is_object());
+        assert!(parsed["quota"]["textLimitDaily"].is_number());
+        assert!(parsed["quota"]["textUsedToday"].is_number());
+        assert!(parsed["quota"]["textRemainingToday"].is_number());
+        assert!(parsed["quota"]["imageLimitDaily"].is_number());
+        assert!(parsed["quota"]["imageUsedToday"].is_number());
+        assert!(parsed["quota"]["imageRemainingToday"].is_number());
     }
 
     #[test]
     fn test_quota_credits_response_schema() {
         // New /quota/credits endpoint should return:
         // {
-        //   "success": true,
-        //   "data": {
-        //     "purchaseTier": "pro",
-        //     "subscriptionCredits": { "current": 450, ... },
-        //     "extraCredits": { "total": 750, ... },
-        //     "totalCredits": 1200,
-        //     "dailyQuota": { ... }  // Optional for backward compatibility
-        //   }
+        //   "purchaseTier": "pro",
+        //   "subscriptionCredits": { "current": 450, ... },
+        //   "extraCredits": { "total": 750, ... },
+        //   "totalCredits": 1200,
+        //   "dailyQuota": { ... }  // Optional for backward compatibility
         // }
 
         let credits_schema = r#"{
-            "success": true,
-            "data": {
-                "purchaseTier": "pro",
-                "subscriptionCredits": {
-                    "current": 450,
-                    "monthlyAllocation": 1000,
-                    "resetsAt": "2025-12-15T00:00:00Z"
-                },
-                "extraCredits": {
-                    "total": 750,
-                    "purchases": []
-                },
-                "totalCredits": 1200,
-                "dailyQuota": {
-                    "textLimitDaily": 1000,
-                    "textUsedToday": 10,
-                    "textRemainingToday": 990,
-                    "imageLimitDaily": 50,
-                    "imageUsedToday": 2,
-                    "imageRemainingToday": 48
-                }
+            "purchaseTier": "pro",
+            "subscriptionCredits": {
+                "current": 450,
+                "monthlyAllocation": 1000,
+                "resetsAt": "2025-12-15T00:00:00Z"
+            },
+            "extraCredits": {
+                "total": 750,
+                "purchases": []
+            },
+            "totalCredits": 1200,
+            "dailyQuota": {
+                "textLimitDaily": 1000,
+                "textUsedToday": 10,
+                "textRemainingToday": 990,
+                "imageLimitDaily": 50,
+                "imageUsedToday": 2,
+                "imageRemainingToday": 48
             }
         }"#;
 
         let parsed: Value = serde_json::from_str(credits_schema).unwrap();
 
         // Verify new fields exist
-        assert_eq!(parsed["success"], true);
-        assert!(parsed["data"]["subscriptionCredits"].is_object());
-        assert!(parsed["data"]["extraCredits"].is_object());
-        assert!(parsed["data"]["totalCredits"].is_number());
+        assert!(parsed["subscriptionCredits"].is_object());
+        assert!(parsed["extraCredits"].is_object());
+        assert!(parsed["totalCredits"].is_number());
 
         // Verify backward compatibility - dailyQuota is included
-        assert!(parsed["data"]["dailyQuota"].is_object());
+        assert!(parsed["dailyQuota"].is_object());
     }
 
     #[test]

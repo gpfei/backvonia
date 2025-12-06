@@ -1,9 +1,9 @@
+use crate::models::common::ErrorResponse;
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
-use serde_json::json;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ApiError {
@@ -106,13 +106,7 @@ impl IntoResponse for ApiError {
             }
         };
 
-        let body = json!({
-            "success": false,
-            "error": {
-                "code": error_code,
-                "message": message,
-            }
-        });
+        let body = ErrorResponse::new(error_code, message, None);
 
         (status, Json(body)).into_response()
     }

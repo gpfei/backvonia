@@ -6,13 +6,7 @@ use crate::{
     app_state::AppState,
     error::{ApiError, Result},
     middleware::UserIdentity,
-    models::{
-        common::SuccessResponse,
-        credits::{
-            CreditPurchaseData, CreditPurchaseRequest, CreditPurchaseResponse, CreditsQuotaData,
-            CreditsQuotaResponse,
-        },
-    },
+    models::credits::{CreditPurchaseRequest, CreditPurchaseResponse, CreditsQuotaResponse},
 };
 
 /// POST /api/v1/credits/purchase
@@ -53,12 +47,12 @@ pub async fn record_credit_purchase(
         .get_credits_quota(identity.user_id)
         .await?;
 
-    Ok(Json(SuccessResponse::new(CreditPurchaseData {
+    Ok(Json(CreditPurchaseResponse {
         credits_added: amount,
         total_extra_credits: total_extra,
         purchase_id,
         quota: quota_info,
-    })))
+    }))
 }
 
 /// GET /api/v1/quota
@@ -73,10 +67,10 @@ pub async fn get_credits_quota(
         .get_credits_quota(identity.user_id)
         .await?;
 
-    Ok(Json(SuccessResponse::new(CreditsQuotaData {
+    Ok(Json(CreditsQuotaResponse {
         account_tier: identity.account_tier,
         subscription_credits: quota_info.subscription_credits.clone(),
         extra_credits: quota_info.extra_credits.clone(),
         total_credits: quota_info.total_credits,
-    })))
+    }))
 }

@@ -27,8 +27,8 @@ pub struct RateLimitConfig {
 impl Default for RateLimitConfig {
     fn default() -> Self {
         Self {
-            free_tier_rpm: 60,  // 1 request per second
-            pro_tier_rpm: 600,  // 10 requests per second
+            free_tier_rpm: 60, // 1 request per second
+            pro_tier_rpm: 600, // 10 requests per second
             window_seconds: 60,
         }
     }

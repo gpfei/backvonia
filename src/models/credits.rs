@@ -2,7 +2,7 @@ use entity::sea_orm_active_enums::AccountTier;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
-use super::common::{IAPPlatform, SuccessResponse};
+use super::common::IAPPlatform;
 
 /// Request to record a credit purchase
 #[derive(Debug, Deserialize, Validate)]
@@ -25,12 +25,9 @@ pub struct CreditPurchaseRequest {
     pub receipt: Option<String>,
 }
 
-/// Response for credit purchase recording
-pub type CreditPurchaseResponse = SuccessResponse<CreditPurchaseData>;
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CreditPurchaseData {
+pub struct CreditPurchaseResponse {
     pub credits_added: i32,
     pub total_extra_credits: i32,
     pub purchase_id: uuid::Uuid,
@@ -75,12 +72,9 @@ pub struct CreditsQuotaInfo {
     pub total_credits: i32,
 }
 
-/// Updated quota response with credit information
-pub type CreditsQuotaResponse = SuccessResponse<CreditsQuotaData>;
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CreditsQuotaData {
+pub struct CreditsQuotaResponse {
     pub account_tier: AccountTier,
     pub subscription_credits: SubscriptionCreditsInfo,
     pub extra_credits: ExtraCreditsInfo,

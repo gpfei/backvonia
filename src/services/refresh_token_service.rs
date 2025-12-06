@@ -1,4 +1,7 @@
-use crate::{config::AuthConfig, error::{ApiError, Result}};
+use crate::{
+    config::AuthConfig,
+    error::{ApiError, Result},
+};
 use entity::refresh_tokens;
 use sea_orm::{entity::*, query::*, sea_query::Expr, ActiveValue::Set, DatabaseConnection};
 use serde_json::json;
@@ -10,9 +13,9 @@ use uuid::Uuid;
 /// Device information stored with refresh token
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DeviceInfo {
-    pub platform: String,      // ios, ipados, macos
-    pub device_id: String,      // X-Device-Id header
-    pub app_version: Option<String>,  // X-Client-Version header
+    pub platform: String,            // ios, ipados, macos
+    pub device_id: String,           // X-Device-Id header
+    pub app_version: Option<String>, // X-Client-Version header
 }
 
 pub struct RefreshTokenService {
@@ -39,7 +42,8 @@ impl RefreshTokenService {
 
         // Calculate expiration
         let now = OffsetDateTime::now_utc();
-        let expires_at = now + time::Duration::days(self.config.refresh_token_expiration_days as i64);
+        let expires_at =
+            now + time::Duration::days(self.config.refresh_token_expiration_days as i64);
 
         // Store in database
         let new_token = refresh_tokens::ActiveModel {
@@ -68,10 +72,7 @@ impl RefreshTokenService {
     /// 3. Checks if it's expired or revoked
     /// 4. Updates last_used_at
     /// 5. Returns the user_id
-    pub async fn validate_and_update_refresh_token(
-        &self,
-        refresh_token: &str,
-    ) -> Result<Uuid> {
+    pub async fn validate_and_update_refresh_token(&self, refresh_token: &str) -> Result<Uuid> {
         let token_hash = Self::hash_token(refresh_token);
         let now = OffsetDateTime::now_utc();
 
@@ -84,7 +85,9 @@ impl RefreshTokenService {
 
         // Check if revoked
         if token_record.revoked_at.is_some() {
-            return Err(ApiError::InvalidToken("Refresh token has been revoked".to_string()));
+            return Err(ApiError::InvalidToken(
+                "Refresh token has been revoked".to_string(),
+            ));
         }
 
         // Check if expired
@@ -114,7 +117,9 @@ impl RefreshTokenService {
             .await?;
 
         if result.rows_affected == 0 {
-            return Err(ApiError::InvalidToken("Refresh token not found".to_string()));
+            return Err(ApiError::InvalidToken(
+                "Refresh token not found".to_string(),
+            ));
         }
 
         Ok(())
@@ -148,8 +153,10 @@ impl RefreshTokenService {
                     .add(
                         Condition::all()
                             .add(refresh_tokens::Column::RevokedAt.is_not_null())
-                            .add(refresh_tokens::Column::RevokedAt.lt(now - time::Duration::days(7)))
-                    )
+                            .add(
+                                refresh_tokens::Column::RevokedAt.lt(now - time::Duration::days(7)),
+                            ),
+                    ),
             )
             .exec(&self.db)
             .await?;

@@ -18,11 +18,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(
-                        ColumnDef::new(UserCreditBalance::UserId)
-                            .uuid()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(UserCreditBalance::UserId).uuid().not_null())
                     .col(
                         ColumnDef::new(UserCreditBalance::SubscriptionCredits)
                             .integer()
@@ -100,7 +96,7 @@ enum Users {
 enum UserCreditBalance {
     Table,
     Id,
-    UserId,  // Changed from PurchaseIdentity
+    UserId, // Changed from PurchaseIdentity
     SubscriptionCredits,
     SubscriptionMonthlyAllocation,
     SubscriptionResetsAt,

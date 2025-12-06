@@ -18,7 +18,11 @@ impl MigrationTrait for Migration {
                     .col(string(WelcomeBonuses::Provider).not_null())
                     .col(string(WelcomeBonuses::ProviderUserId).not_null())
                     .col(integer(WelcomeBonuses::AmountGranted).not_null())
-                    .col(string(WelcomeBonuses::Reason).not_null().default("new_user"))
+                    .col(
+                        string(WelcomeBonuses::Reason)
+                            .not_null()
+                            .default("new_user"),
+                    )
                     .col(
                         timestamp_with_time_zone(WelcomeBonuses::GrantedAt)
                             .not_null()

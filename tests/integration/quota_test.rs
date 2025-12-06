@@ -64,7 +64,11 @@ async fn test_quota_race_condition_prevented() {
 
             // Try to use credits atomically (ContinueProse = 5 credits)
             service
-                .check_and_increment_quota_weighted(user_id, &tier_clone, AIOperation::ContinueProse)
+                .check_and_increment_quota_weighted(
+                    user_id,
+                    &tier_clone,
+                    AIOperation::ContinueProse,
+                )
                 .await
         });
 

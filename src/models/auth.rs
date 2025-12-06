@@ -1,3 +1,4 @@
+use crate::models::common::MessageResponse;
 use entity::sea_orm_active_enums::{AccountTier, UserStatus};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -23,9 +24,9 @@ pub struct AppleSignInRequest {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceInfoRequest {
-    pub platform: String,      // ios, ipados, macos
-    pub device_id: String,      // X-Device-Id header
-    pub app_version: Option<String>,  // X-Client-Version header
+    pub platform: String,            // ios, ipados, macos
+    pub device_id: String,           // X-Device-Id header
+    pub app_version: Option<String>, // X-Client-Version header
 }
 
 /// Request body for refreshing access token
@@ -43,21 +44,16 @@ pub struct LogoutRequest {
 }
 
 // ============================================================================
-// Response Models
+// Response Models (HTTP 2xx payloads)
 // ============================================================================
-
-use crate::models::common::{MessageData, SuccessResponse};
-
-/// Response from successful authentication
-pub type AuthResponse = SuccessResponse<AuthData>;
 
 /// Authentication data containing tokens and user info
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AuthData {
+pub struct AuthResponse {
     pub access_token: String,
     pub refresh_token: String,
-    pub expires_in: u64,  // Access token expiration in seconds
+    pub expires_in: u64, // Access token expiration in seconds
     pub user: UserResponse,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub welcome_bonus: Option<WelcomeBonusResponse>,
@@ -85,21 +81,18 @@ pub struct WelcomeBonusResponse {
 }
 
 /// Response from token refresh
-pub type RefreshTokenResponse = SuccessResponse<RefreshTokenData>;
-
-/// Refresh token data containing new access token
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RefreshTokenData {
+pub struct RefreshTokenResponse {
     pub access_token: String,
-    pub expires_in: u64,  // Access token expiration in seconds
+    pub expires_in: u64, // Access token expiration in seconds
 }
 
 /// Response from logout (message-only response)
-pub type LogoutResponse = SuccessResponse<MessageData>;
+pub type LogoutResponse = MessageResponse;
 
 /// Response from /auth/me endpoint
-pub type MeResponse = SuccessResponse<UserResponse>;
+pub type MeResponse = UserResponse;
 
 // ============================================================================
 // Conversion Functions

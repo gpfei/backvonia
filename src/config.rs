@@ -52,8 +52,8 @@ pub struct AuthConfig {
     pub access_token_expiration_minutes: u64,
     #[serde(default = "default_refresh_token_expiration_days")]
     pub refresh_token_expiration_days: u64,
-    pub apple_client_id: String,  // Apple Sign In client ID (bundle ID)
-    pub apple_team_id: String,     // Apple developer team ID
+    pub apple_client_id: String, // Apple Sign In client ID (bundle ID)
+    pub apple_team_id: String,   // Apple developer team ID
     #[serde(default = "default_welcome_bonus_amount")]
     pub welcome_bonus_amount: i32, // Welcome bonus credits for new users (default: 5)
 }

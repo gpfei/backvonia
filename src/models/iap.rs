@@ -2,7 +2,7 @@ use entity::sea_orm_active_enums::AccountTier;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
-use super::common::{IAPPlatform, PurchaseTier, SuccessResponse};
+use super::common::{IAPPlatform, PurchaseTier};
 
 /// IAP Verify Request
 #[derive(Debug, Deserialize, Validate)]
@@ -17,12 +17,9 @@ pub struct IAPVerifyRequest {
     pub device_id: Option<String>,
 }
 
-/// IAP Verify Response
-pub type IAPVerifyResponse = SuccessResponse<IAPVerifyData>;
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct IAPVerifyData {
+pub struct IAPVerifyResponse {
     pub purchase_tier: PurchaseTier,
     pub purchase_identity: String,
     pub product_id: Option<String>,
@@ -55,12 +52,9 @@ pub struct IAPLinkRequest {
     pub receipt: String,
 }
 
-/// IAP Link Response
-pub type IAPLinkResponse = SuccessResponse<IAPLinkData>;
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct IAPLinkData {
+pub struct IAPLinkResponse {
     pub account_tier: AccountTier,
     pub product_id: Option<String>,
     pub valid_until: Option<time::OffsetDateTime>,

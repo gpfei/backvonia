@@ -39,9 +39,11 @@ pub async fn jwt_auth_middleware(
         .ok_or_else(|| ApiError::Unauthorized("Missing Authorization header".to_string()))?;
 
     // Parse "Bearer <token>" format
-    let token = auth_header
-        .strip_prefix("Bearer ")
-        .ok_or_else(|| ApiError::InvalidToken("Invalid Authorization format, expected 'Bearer <token>'".to_string()))?;
+    let token = auth_header.strip_prefix("Bearer ").ok_or_else(|| {
+        ApiError::InvalidToken(
+            "Invalid Authorization format, expected 'Bearer <token>'".to_string(),
+        )
+    })?;
 
     // Validate JWT token
     let claims = state.jwt_service.validate_token(token)?;
