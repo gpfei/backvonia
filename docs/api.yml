@@ -800,7 +800,7 @@ components:
           format: uuid
           description: Internal purchase record ID
         quota:
-          $ref: '#/components/schemas/CreditsQuotaInfo'
+          $ref: '#/components/schemas/CreditsQuotaSummary'
 
     CreditsQuotaInfo:
       type: object
@@ -809,6 +809,18 @@ components:
           $ref: '#/components/schemas/SubscriptionCreditsInfo'
         extraCredits:
           $ref: '#/components/schemas/ExtraCreditsInfo'
+        totalCredits:
+          type: integer
+          description: Total available credits
+
+    CreditsQuotaSummary:
+      type: object
+      properties:
+        subscriptionCredits:
+          $ref: '#/components/schemas/SubscriptionCreditsInfo'
+        extraCreditsTotal:
+          type: integer
+          description: Total remaining extra credits
         totalCredits:
           type: integer
           description: Total available credits

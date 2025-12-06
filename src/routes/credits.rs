@@ -44,7 +44,7 @@ pub async fn record_credit_purchase(
     // Get updated quota info
     let quota_info = state
         .credits_service
-        .get_credits_quota(identity.user_id)
+        .get_credits_quota_summary(identity.user_id)
         .await?;
 
     Ok(Json(CreditPurchaseResponse {

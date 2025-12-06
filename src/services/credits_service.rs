@@ -4,7 +4,8 @@ use crate::{
         common::IAPPlatform,
         credit_events_ext::CreditEventExt,
         credits::{
-            CreditPurchaseRecord, CreditsQuotaInfo, ExtraCreditsInfo, SubscriptionCreditsInfo,
+            CreditPurchaseRecord, CreditsQuotaInfo, CreditsQuotaSummary, ExtraCreditsInfo,
+            SubscriptionCreditsInfo,
         },
     },
 };
@@ -521,6 +522,17 @@ impl CreditsService {
                 purchases: purchase_records,
             },
             total_credits: balance.subscription_credits + extra_credits_total,
+        })
+    }
+
+    /// Get quota summary without purchase breakdown
+    #[instrument(skip(self))]
+    pub async fn get_credits_quota_summary(&self, user_id: Uuid) -> Result<CreditsQuotaSummary> {
+        let full = self.get_credits_quota(user_id).await?;
+        Ok(CreditsQuotaSummary {
+            subscription_credits: full.subscription_credits,
+            extra_credits_total: full.extra_credits.total,
+            total_credits: full.total_credits,
         })
     }
 }

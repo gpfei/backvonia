@@ -32,7 +32,7 @@ pub struct CreditPurchaseResponse {
     pub credits_added: i32,
     pub total_extra_credits: i32,
     pub purchase_id: uuid::Uuid,
-    pub quota: CreditsQuotaInfo,
+    pub quota: CreditsQuotaSummary,
 }
 
 /// Single credit purchase record
@@ -70,6 +70,15 @@ pub struct ExtraCreditsInfo {
 pub struct CreditsQuotaInfo {
     pub subscription_credits: SubscriptionCreditsInfo,
     pub extra_credits: ExtraCreditsInfo,
+    pub total_credits: i32,
+}
+
+/// Trimmed quota summary without purchase breakdown (used in purchase response)
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CreditsQuotaSummary {
+    pub subscription_credits: SubscriptionCreditsInfo,
+    pub extra_credits_total: i32,
     pub total_credits: i32,
 }
 
