@@ -320,76 +320,29 @@ impl CreditsService {
         let total_remaining: i32 = events.iter().map(|p| p.remaining()).sum();
         let now = time::OffsetDateTime::now_utc();
 
-        // CRITICAL FIX: Update user_credit_balance.extra_credits_remaining
-        // This is what QuotaService reads to check if user has credits!
-        //
-        // IMPORTANT: We only UPDATE existing balances, never INSERT.
-        // Rationale: CreditsService doesn't know the user's tier (free/pro),
-        // so we can't correctly initialize subscription_credits/subscription_monthly_allocation.
-        // QuotaService creates the balance on first quota check with proper tier information.
-        // This ensures users don't lose subscription credits regardless of first touchpoint.
-        let balance = entity::user_credit_balance::Entity::find()
-            .filter(entity::user_credit_balance::Column::UserId.eq(user_id))
-            .one(txn)
-            .await?;
+        // Upsert user_credit_balance so grants are immediately reflected
+        let balance = entity::user_credit_balance::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            user_id: Set(user_id),
+            subscription_credits: Set(0),
+            subscription_monthly_allocation: Set(0),
+            subscription_resets_at: Set(None),
+            extra_credits_remaining: Set(total_remaining),
+            last_updated: Set(now),
+            created_at: Set(now),
+        };
 
-        if let Some(balance) = balance {
-            // Update existing balance (normal case after first quota check)
-            let mut balance_active: entity::user_credit_balance::ActiveModel = balance.into();
-            balance_active.extra_credits_remaining = Set(total_remaining);
-            balance_active.last_updated = Set(now);
-            balance_active.update(txn).await?;
-        }
-        // If balance doesn't exist, do nothing here.
-        // QuotaService will create it properly with tier information on first use.
-
-        // Also update quota_usage for backward compatibility and analytics
-        // (but QuotaService no longer reads from here)
-        let today = now.date();
-        let quota_usage = entity::quota_usage::Entity::find()
-            .filter(entity::quota_usage::Column::UserId.eq(user_id))
-            .filter(entity::quota_usage::Column::UsageDate.eq(today))
-            .one(txn)
-            .await?;
-
-        if let Some(quota) = quota_usage {
-            let mut quota_active: entity::quota_usage::ActiveModel = quota.into();
-            quota_active.extra_credits_total = Set(total_remaining);
-            quota_active.last_extra_credits_sync = Set(Some(now));
-            quota_active.updated_at = Set(now);
-            quota_active.update(txn).await?;
-        } else {
-            let new_quota = entity::quota_usage::ActiveModel {
-                id: Set(Uuid::new_v4()),
-                user_id: Set(user_id),
-                usage_date: Set(today),
-                text_count: Set(0),
-                image_count: Set(0),
-                extra_credits_total: Set(total_remaining),
-                subscription_credits: Set(0),
-                subscription_monthly_allocation: Set(0),
-                last_extra_credits_sync: Set(Some(now)),
-                subscription_resets_at: Set(None),
-                created_at: Set(now),
-                updated_at: Set(now),
-            };
-
-            entity::quota_usage::Entity::insert(new_quota)
-                .on_conflict(
-                    OnConflict::columns([
-                        entity::quota_usage::Column::UserId,
-                        entity::quota_usage::Column::UsageDate,
-                    ])
+        entity::user_credit_balance::Entity::insert(balance)
+            .on_conflict(
+                OnConflict::column(entity::user_credit_balance::Column::UserId)
                     .update_columns([
-                        entity::quota_usage::Column::ExtraCreditsTotal,
-                        entity::quota_usage::Column::LastExtraCreditsSync,
-                        entity::quota_usage::Column::UpdatedAt,
+                        entity::user_credit_balance::Column::ExtraCreditsRemaining,
+                        entity::user_credit_balance::Column::LastUpdated,
                     ])
                     .to_owned(),
-                )
-                .exec(txn)
-                .await?;
-        }
+            )
+            .exec(txn)
+            .await?;
 
         Ok(total_remaining)
     }

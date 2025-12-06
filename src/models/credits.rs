@@ -19,6 +19,7 @@ pub struct CreditPurchaseRequest {
 
     pub platform: IAPPlatform,
 
+    #[serde(with = "time::serde::rfc3339")]
     pub purchase_date: time::OffsetDateTime,
 
     #[validate(length(max = 100000))]

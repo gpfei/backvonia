@@ -776,11 +776,15 @@ components:
           type: string
           format: date-time
           description: Purchase timestamp from IAP receipt
+        platform:
+          type: string
+          enum: [apple, google]
+          description: Purchase platform
         receipt:
           type: string
           nullable: true
           description: Base64-encoded receipt (optional)
-      required: [transactionId, productId, purchaseDate]
+      required: [transactionId, productId, purchaseDate, platform]
 
     CreditPurchaseResponse:
       type: object
