@@ -6,7 +6,7 @@ pub mod iap;
 
 use crate::{
     app_state::AppState,
-    middleware::{create_rate_limiter, jwt_auth_middleware},
+    middleware::{create_rate_limiter, jwt_auth_middleware, logging_middleware},
 };
 use axum::{
     middleware,
@@ -53,9 +53,10 @@ fn api_v1_routes(state: AppState) -> Router<AppState> {
         .route("/auth/refresh", post(auth::refresh_token))
         .route("/auth/logout", post(auth::logout));
 
-    // Combine all routes
+    // Combine all routes with request/response body logging
     Router::new()
         .merge(protected_routes)
         .merge(auth_only_routes)
         .merge(public_routes)
+        .layer(middleware::from_fn(logging_middleware))
 }
