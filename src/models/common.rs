@@ -1,6 +1,14 @@
 use serde::{Deserialize, Serialize};
 
-/// Generic success response wrapper
+/// Generic success response wrapper used across all API endpoints
+///
+/// Provides a consistent response format:
+/// ```json
+/// {
+///   "success": true,
+///   "data": { ... }
+/// }
+/// ```
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SuccessResponse<T> {
@@ -9,10 +17,26 @@ pub struct SuccessResponse<T> {
 }
 
 impl<T> SuccessResponse<T> {
+    /// Create a new success response with the given data
     pub fn new(data: T) -> Self {
         Self {
             success: true,
             data,
+        }
+    }
+}
+
+/// Helper wrapper for message-only responses (e.g., logout success)
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageData {
+    pub message: String,
+}
+
+impl MessageData {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
         }
     }
 }

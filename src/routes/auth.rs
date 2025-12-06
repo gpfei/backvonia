@@ -5,9 +5,12 @@ use crate::{
     app_state::AppState,
     error::Result,
     middleware::UserIdentity,
-    models::auth::{
-        AppleSignInRequest, AuthData, AuthResponse, LogoutRequest, LogoutResponse, MeResponse,
-        RefreshTokenData, RefreshTokenRequest, RefreshTokenResponse, UserResponse,
+    models::{
+        auth::{
+            AppleSignInRequest, AuthData, AuthResponse, LogoutRequest, LogoutResponse, MeResponse,
+            RefreshTokenData, RefreshTokenRequest, RefreshTokenResponse, UserResponse,
+        },
+        common::{MessageData, SuccessResponse},
     },
 };
 
@@ -67,16 +70,13 @@ pub async fn apple_sign_in(
         .authenticate_with_apple(&request.id_token, request.full_name, device_info)
         .await?;
 
-    Ok(Json(AuthResponse {
-        success: true,
-        data: AuthData {
-            access_token: auth_tokens.access_token,
-            refresh_token: auth_tokens.refresh_token,
-            expires_in: auth_tokens.expires_in,
-            user: auth_tokens.user.into(),
-            welcome_bonus: auth_tokens.welcome_bonus.map(|b| b.into()),
-        },
-    }))
+    Ok(Json(SuccessResponse::new(AuthData {
+        access_token: auth_tokens.access_token,
+        refresh_token: auth_tokens.refresh_token,
+        expires_in: auth_tokens.expires_in,
+        user: auth_tokens.user.into(),
+        welcome_bonus: auth_tokens.welcome_bonus.map(|b| b.into()),
+    })))
 }
 
 /// POST /api/v1/auth/refresh
@@ -111,13 +111,10 @@ pub async fn refresh_token(
         .refresh_access_token(&request.refresh_token)
         .await?;
 
-    Ok(Json(RefreshTokenResponse {
-        success: true,
-        data: RefreshTokenData {
-            access_token,
-            expires_in,
-        },
-    }))
+    Ok(Json(SuccessResponse::new(RefreshTokenData {
+        access_token,
+        expires_in,
+    })))
 }
 
 /// POST /api/v1/auth/logout
@@ -149,10 +146,9 @@ pub async fn logout(
         .logout(&request.refresh_token)
         .await?;
 
-    Ok(Json(LogoutResponse {
-        success: true,
-        message: "Logged out successfully".to_string(),
-    }))
+    Ok(Json(SuccessResponse::new(MessageData::new(
+        "Logged out successfully",
+    ))))
 }
 
 /// POST /api/v1/auth/logout-all
@@ -179,10 +175,10 @@ pub async fn logout_all(
         .logout_all(identity.user_id)
         .await?;
 
-    Ok(Json(LogoutResponse {
-        success: true,
-        message: format!("Logged out from {} device(s)", revoked_count),
-    }))
+    Ok(Json(SuccessResponse::new(MessageData::new(format!(
+        "Logged out from {} device(s)",
+        revoked_count
+    )))))
 }
 
 /// GET /api/v1/auth/me
@@ -213,8 +209,5 @@ pub async fn get_me(
     // Get user info
     let user_info = state.auth_service.get_user(identity.user_id).await?;
 
-    Ok(Json(MeResponse {
-        success: true,
-        data: UserResponse::from(user_info),
-    }))
+    Ok(Json(SuccessResponse::new(UserResponse::from(user_info))))
 }

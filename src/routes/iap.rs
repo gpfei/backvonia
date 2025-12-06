@@ -7,7 +7,10 @@ use crate::{
     app_state::AppState,
     error::{ApiError, Result},
     middleware::UserIdentity,
-    models::iap::{IAPLinkData, IAPLinkRequest, IAPLinkResponse},
+    models::{
+        common::SuccessResponse,
+        iap::{IAPLinkData, IAPLinkRequest, IAPLinkResponse},
+    },
 };
 
 /// POST /api/v1/iap/verify
@@ -136,12 +139,9 @@ pub async fn verify_iap(
         "IAP linked to user account and tier updated"
     );
 
-    Ok(Json(IAPLinkResponse {
-        success: true,
-        data: IAPLinkData {
-            account_tier,
-            product_id: verification.product_id,
-            valid_until: verification.valid_until,
-        },
-    }))
+    Ok(Json(SuccessResponse::new(IAPLinkData {
+        account_tier,
+        product_id: verification.product_id,
+        valid_until: verification.valid_until,
+    })))
 }

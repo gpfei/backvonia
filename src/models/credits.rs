@@ -2,7 +2,7 @@ use entity::sea_orm_active_enums::AccountTier;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
-use super::common::IAPPlatform;
+use super::common::{IAPPlatform, SuccessResponse};
 
 /// Request to record a credit purchase
 #[derive(Debug, Deserialize, Validate)]
@@ -26,12 +26,7 @@ pub struct CreditPurchaseRequest {
 }
 
 /// Response for credit purchase recording
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CreditPurchaseResponse {
-    pub success: bool,
-    pub data: CreditPurchaseData,
-}
+pub type CreditPurchaseResponse = SuccessResponse<CreditPurchaseData>;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -81,12 +76,7 @@ pub struct CreditsQuotaInfo {
 }
 
 /// Updated quota response with credit information
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CreditsQuotaResponse {
-    pub success: bool,
-    pub data: CreditsQuotaData,
-}
+pub type CreditsQuotaResponse = SuccessResponse<CreditsQuotaData>;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

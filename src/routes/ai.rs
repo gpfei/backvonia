@@ -11,7 +11,7 @@ use crate::{
             AITextContinueData, AITextContinueMode, AITextContinueRequest, AITextContinueResponse,
             AITextEditData, AITextEditMode, AITextEditRequest, AITextEditResponse,
         },
-        common::AIOperation,
+        common::{AIOperation, SuccessResponse},
     },
 };
 
@@ -53,10 +53,7 @@ pub async fn text_continue(
         )
         .await?;
 
-    Ok(Json(AITextContinueResponse {
-        success: true,
-        data: AITextContinueData { candidates },
-    }))
+    Ok(Json(SuccessResponse::new(AITextContinueData { candidates })))
 }
 
 /// POST /api/v1/ai/image/generate
@@ -86,10 +83,7 @@ pub async fn image_generate(
         .generate_image(&request.story_context, &request.node, &request.image_params)
         .await?;
 
-    Ok(Json(AIImageGenerateResponse {
-        success: true,
-        data: AIImageGenerateData { image },
-    }))
+    Ok(Json(SuccessResponse::new(AIImageGenerateData { image })))
 }
 
 /// POST /api/v1/ai/text/edit
@@ -132,11 +126,8 @@ pub async fn text_edit(
         )
         .await?;
 
-    Ok(Json(AITextEditResponse {
-        success: true,
-        data: AITextEditData {
-            mode: request.mode,
-            candidates,
-        },
-    }))
+    Ok(Json(SuccessResponse::new(AITextEditData {
+        mode: request.mode,
+        candidates,
+    })))
 }

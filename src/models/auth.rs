@@ -46,14 +46,12 @@ pub struct LogoutRequest {
 // Response Models
 // ============================================================================
 
-/// Response from successful authentication
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AuthResponse {
-    pub success: bool,
-    pub data: AuthData,
-}
+use crate::models::common::{MessageData, SuccessResponse};
 
+/// Response from successful authentication
+pub type AuthResponse = SuccessResponse<AuthData>;
+
+/// Authentication data containing tokens and user info
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthData {
@@ -87,13 +85,9 @@ pub struct WelcomeBonusResponse {
 }
 
 /// Response from token refresh
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RefreshTokenResponse {
-    pub success: bool,
-    pub data: RefreshTokenData,
-}
+pub type RefreshTokenResponse = SuccessResponse<RefreshTokenData>;
 
+/// Refresh token data containing new access token
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RefreshTokenData {
@@ -101,21 +95,11 @@ pub struct RefreshTokenData {
     pub expires_in: u64,  // Access token expiration in seconds
 }
 
-/// Response from logout
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LogoutResponse {
-    pub success: bool,
-    pub message: String,
-}
+/// Response from logout (message-only response)
+pub type LogoutResponse = SuccessResponse<MessageData>;
 
 /// Response from /auth/me endpoint
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MeResponse {
-    pub success: bool,
-    pub data: UserResponse,
-}
+pub type MeResponse = SuccessResponse<UserResponse>;
 
 // ============================================================================
 // Conversion Functions

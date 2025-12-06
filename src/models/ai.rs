@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
+use super::common::SuccessResponse;
+
 /// AI Text Continue Mode
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -103,12 +105,7 @@ fn default_avoid_hard_end() -> bool {
 }
 
 /// AI Text Continue Response
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AITextContinueResponse {
-    pub success: bool,
-    pub data: AITextContinueData,
-}
+pub type AITextContinueResponse = SuccessResponse<AITextContinueData>;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -194,12 +191,7 @@ fn default_resolution() -> String {
 }
 
 /// AI Image Generate Response
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AIImageGenerateResponse {
-    pub success: bool,
-    pub data: AIImageGenerateData,
-}
+pub type AIImageGenerateResponse = SuccessResponse<AIImageGenerateData>;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -294,12 +286,7 @@ fn default_edit_candidates() -> u8 {
 }
 
 /// AI Text Edit Response
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AITextEditResponse {
-    pub success: bool,
-    pub data: AITextEditData,
-}
+pub type AITextEditResponse = SuccessResponse<AITextEditData>;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

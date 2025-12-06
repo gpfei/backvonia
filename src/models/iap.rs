@@ -2,7 +2,7 @@ use entity::sea_orm_active_enums::AccountTier;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
-use super::common::{IAPPlatform, PurchaseTier};
+use super::common::{IAPPlatform, PurchaseTier, SuccessResponse};
 
 /// IAP Verify Request
 #[derive(Debug, Deserialize, Validate)]
@@ -18,12 +18,7 @@ pub struct IAPVerifyRequest {
 }
 
 /// IAP Verify Response
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct IAPVerifyResponse {
-    pub success: bool,
-    pub data: IAPVerifyData,
-}
+pub type IAPVerifyResponse = SuccessResponse<IAPVerifyData>;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -61,12 +56,7 @@ pub struct IAPLinkRequest {
 }
 
 /// IAP Link Response
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct IAPLinkResponse {
-    pub success: bool,
-    pub data: IAPLinkData,
-}
+pub type IAPLinkResponse = SuccessResponse<IAPLinkData>;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

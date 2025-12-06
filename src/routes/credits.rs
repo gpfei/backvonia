@@ -6,9 +6,12 @@ use crate::{
     app_state::AppState,
     error::{ApiError, Result},
     middleware::UserIdentity,
-    models::credits::{
-        CreditPurchaseData, CreditPurchaseRequest, CreditPurchaseResponse, CreditsQuotaData,
-        CreditsQuotaResponse,
+    models::{
+        common::SuccessResponse,
+        credits::{
+            CreditPurchaseData, CreditPurchaseRequest, CreditPurchaseResponse, CreditsQuotaData,
+            CreditsQuotaResponse,
+        },
     },
 };
 
@@ -50,15 +53,12 @@ pub async fn record_credit_purchase(
         .get_credits_quota(identity.user_id)
         .await?;
 
-    Ok(Json(CreditPurchaseResponse {
-        success: true,
-        data: CreditPurchaseData {
-            credits_added: amount,
-            total_extra_credits: total_extra,
-            purchase_id,
-            quota: quota_info,
-        },
-    }))
+    Ok(Json(SuccessResponse::new(CreditPurchaseData {
+        credits_added: amount,
+        total_extra_credits: total_extra,
+        purchase_id,
+        quota: quota_info,
+    })))
 }
 
 /// GET /api/v1/quota
@@ -73,13 +73,10 @@ pub async fn get_credits_quota(
         .get_credits_quota(identity.user_id)
         .await?;
 
-    Ok(Json(CreditsQuotaResponse {
-        success: true,
-        data: CreditsQuotaData {
-            account_tier: identity.account_tier,
-            subscription_credits: quota_info.subscription_credits.clone(),
-            extra_credits: quota_info.extra_credits.clone(),
-            total_credits: quota_info.total_credits,
-        },
-    }))
+    Ok(Json(SuccessResponse::new(CreditsQuotaData {
+        account_tier: identity.account_tier,
+        subscription_credits: quota_info.subscription_credits.clone(),
+        extra_credits: quota_info.extra_credits.clone(),
+        total_credits: quota_info.total_credits,
+    })))
 }
