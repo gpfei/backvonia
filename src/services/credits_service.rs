@@ -228,14 +228,26 @@ impl CreditsService {
             metadata: Set(None),
         };
 
-        entity::credits_events::Entity::insert(new_event)
+        // Map uniqueness violations to a client-friendly error
+        let insert_result = entity::credits_events::Entity::insert(new_event)
             .on_conflict(
                 OnConflict::column(entity::credits_events::Column::TransactionId)
                     .do_nothing()
                     .to_owned(),
             )
             .exec(txn)
-            .await?;
+            .await;
+
+        if let Err(ref e) = insert_result {
+            let msg = e.to_string();
+            if msg.contains("unique") || msg.contains("duplicate") {
+                return Err(ApiError::BadRequest(
+                    "Welcome bonus already granted".to_string(),
+                ));
+            }
+        }
+
+        insert_result?;
 
         let persisted = entity::credits_events::Entity::find()
             .filter(entity::credits_events::Column::TransactionId.eq(transaction_id))
