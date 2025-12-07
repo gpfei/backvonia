@@ -9,7 +9,7 @@ use crate::{
         ai::{
             AIImageGenerateRequest, AIImageGenerateResponse, AITextContinueMode,
             AITextContinueRequest, AITextContinueResponse, AITextEditMode, AITextEditRequest,
-            AITextEditResponse,
+            AITextEditResponse, AITextIdeasRequest,
         },
         common::AIOperation,
     },
@@ -30,26 +30,21 @@ pub async fn text_continue(
 
     let tier = &identity.account_tier;
 
-    // Determine operation based on mode
-    let operation = match request.mode {
-        AITextContinueMode::Prose => AIOperation::ContinueProse,
-        AITextContinueMode::Ideas => AIOperation::ContinueIdeas,
-    };
-
     // Atomically check and increment quota with weighted cost
     state
         .quota_service
-        .check_and_increment_quota_weighted(identity.user_id, tier, operation)
+        .check_and_increment_quota_weighted(identity.user_id, tier, AIOperation::ContinueProse)
         .await?;
 
     // Generate candidates
     let candidates = state
         .ai_service
         .generate_text_continuations(
-            request.mode,
+            AITextContinueMode::Prose,
             &request.story_context,
             &request.path_nodes,
             &request.generation_params,
+            request.instructions.as_deref(),
             tier,
         )
         .await?;
@@ -132,4 +127,41 @@ pub async fn text_edit(
         mode: request.mode,
         candidates,
     }))
+}
+
+/// POST /api/v1/ai/text/ideas
+#[instrument(skip(state, identity, request))]
+pub async fn text_ideas(
+    State(state): State<AppState>,
+    identity: UserIdentity,
+    Json(request): Json<AITextIdeasRequest>,
+) -> Result<Json<AITextContinueResponse>> {
+    // Validate request
+    use validator::Validate;
+    request
+        .validate()
+        .map_err(|e| ApiError::BadRequest(format!("Validation error: {}", e)))?;
+
+    let tier = &identity.account_tier;
+
+    // Atomically check and increment quota with weighted cost
+    state
+        .quota_service
+        .check_and_increment_quota_weighted(identity.user_id, tier, AIOperation::ContinueIdeas)
+        .await?;
+
+    // Generate idea candidates
+    let candidates = state
+        .ai_service
+        .generate_text_continuations(
+            AITextContinueMode::Ideas,
+            &request.story_context,
+            &request.path_nodes,
+            &request.generation_params,
+            request.instructions.as_deref(),
+            tier,
+        )
+        .await?;
+
+    Ok(Json(AITextContinueResponse { candidates }))
 }

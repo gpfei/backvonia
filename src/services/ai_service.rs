@@ -90,10 +90,11 @@ impl AIService {
         context: &StoryContext,
         nodes: &[PathNode],
         params: &GenerationParams,
+        instructions: Option<&str>,
         account_tier: &AccountTier,
     ) -> Result<Vec<TextCandidate>> {
         // Build the prompt based on mode
-        let (system_prompt, user_prompt) = match mode {
+        let (system_prompt, mut user_prompt) = match mode {
             AITextContinueMode::Prose => {
                 let system = format!(
                     "You are a creative writing assistant. Generate {} distinct story continuations in full prose.",
@@ -111,6 +112,11 @@ impl AIService {
                 (system, user)
             }
         };
+
+        if let Some(instr) = instructions {
+            user_prompt.push_str("\n\nAdditional instructions:\n");
+            user_prompt.push_str(instr);
+        }
 
         // Choose model based on routing + size
         let input_chars = user_prompt.len() + system_prompt.len();
@@ -187,22 +193,41 @@ impl AIService {
                     let candidates = openai_response
                         .choices
                         .into_iter()
-                        .map(|choice| {
+                        .flat_map(|choice| {
                             let content = choice.message.content;
-                            let (title, parsed_content) = if mode == AITextContinueMode::Ideas {
-                                self.parse_idea_response(&content)
+                            if mode == AITextContinueMode::Ideas {
+                                let (title, parsed_content) = self.parse_idea_response(&content);
+                                vec![TextCandidate {
+                                    id: Uuid::new_v4().to_string(),
+                                    content: parsed_content,
+                                    title,
+                                    safety_flags: vec![],
+                                }]
                             } else {
-                                (None, content)
-                            };
-
-                            TextCandidate {
-                                id: Uuid::new_v4().to_string(),
-                                content: parsed_content,
-                                title,
-                                safety_flags: vec![],
+                                let splits = self.split_markdown_candidates(&content);
+                                if splits.len() > 1 {
+                                    splits
+                                        .into_iter()
+                                        .map(|(title, body)| TextCandidate {
+                                            id: Uuid::new_v4().to_string(),
+                                            content: body,
+                                            title,
+                                            safety_flags: vec![],
+                                        })
+                                        .collect()
+                                } else {
+                                    let parsed = content.trim().to_string();
+                                    let title = self.derive_title_from_content(&parsed);
+                                    vec![TextCandidate {
+                                        id: Uuid::new_v4().to_string(),
+                                        content: parsed,
+                                        title,
+                                        safety_flags: vec![],
+                                    }]
+                                }
                             }
                         })
-                        .collect();
+                        .collect::<Vec<_>>();
 
                     info!(
                         "Generated {} text continuations in mode {:?} using model {} (downgraded={}, attempts={})",
@@ -413,8 +438,72 @@ impl AIService {
             }
         }
 
-        // Fallback: no title found
-        (None, response.to_string())
+        // Fallback: use first line as title if present
+        let mut lines = response.lines();
+        if let Some(first) = lines.next() {
+            let title = first.trim();
+            let remaining = lines.collect::<Vec<_>>().join("\n").trim().to_string();
+            if !title.is_empty() {
+                let content = if remaining.is_empty() {
+                    response.trim().to_string()
+                } else {
+                    remaining
+                };
+                return (Some(title.to_string()), content);
+            }
+        }
+
+        // Final fallback: no title found
+        (None, response.trim().to_string())
+    }
+
+    fn derive_title_from_content(&self, content: &str) -> Option<String> {
+        let first_line = content.lines().find(|line| !line.trim().is_empty())?;
+        let words: Vec<&str> = first_line.split_whitespace().take(8).collect();
+        if words.is_empty() {
+            None
+        } else {
+            Some(words.join(" "))
+        }
+    }
+
+    /// Split a response containing multiple markdown headings (e.g., "**续写一**") into candidates.
+    fn split_markdown_candidates(&self, content: &str) -> Vec<(Option<String>, String)> {
+        let mut results = Vec::new();
+        let mut current_title: Option<String> = None;
+        let mut current_body: Vec<String> = Vec::new();
+        let mut seen_heading = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            let is_heading =
+                trimmed.starts_with("**") && trimmed.ends_with("**") && trimmed.len() > 4;
+
+            if is_heading {
+                // flush previous
+                if seen_heading && !current_body.is_empty() {
+                    let body = current_body.join("\n").trim().to_string();
+                    results.push((current_title.clone(), body));
+                    current_body.clear();
+                }
+                let title = trimmed.trim_matches('*').trim().to_string();
+                current_title = if title.is_empty() { None } else { Some(title) };
+                seen_heading = true;
+            } else {
+                current_body.push(trimmed.to_string());
+            }
+        }
+
+        if seen_heading && !current_body.is_empty() {
+            let body = current_body.join("\n").trim().to_string();
+            results.push((current_title.clone(), body));
+        }
+
+        if results.is_empty() {
+            vec![(None, content.trim().to_string())]
+        } else {
+            results
+        }
     }
 
     /// Generate text edit/transformation via OpenRouter

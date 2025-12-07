@@ -15,12 +15,27 @@ impl Default for AITextContinueMode {
     }
 }
 
-/// AI Text Continue Request
+/// AI Text Continue Request (prose)
 #[derive(Debug, Deserialize, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct AITextContinueRequest {
+    #[validate(length(max = 2000))]
+    pub instructions: Option<String>,
+    #[validate(nested)]
+    pub story_context: StoryContext,
+    #[validate(length(min = 1, max = 50), nested)]
+    pub path_nodes: Vec<PathNode>,
     #[serde(default)]
-    pub mode: AITextContinueMode,
+    #[validate(nested)]
+    pub generation_params: GenerationParams,
+}
+
+/// AI Text Ideas Request
+#[derive(Debug, Deserialize, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct AITextIdeasRequest {
+    #[validate(length(max = 2000))]
+    pub instructions: Option<String>,
     #[validate(nested)]
     pub story_context: StoryContext,
     #[validate(length(min = 1, max = 50), nested)]
