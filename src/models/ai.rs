@@ -63,7 +63,7 @@ pub struct StoryContext {
 pub struct PathNode {
     #[validate(length(max = 200))]
     pub summary: Option<String>,
-    #[validate(length(min = 1, max = 50000))]
+    #[validate(length(min = 0, max = 50000))]
     pub content: String,
 }
 
