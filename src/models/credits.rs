@@ -87,7 +87,7 @@ pub struct CreditsQuotaSummary {
 pub struct CreditsQuotaResponse {
     pub account_tier: AccountTier,
     pub subscription_credits: SubscriptionCreditsInfo,
-    pub extra_credits: ExtraCreditsInfo,
+    pub extra_credits: i32,
     pub total_credits: i32,
 }
 

@@ -64,13 +64,13 @@ pub async fn get_credits_quota(
     // Get credits quota info
     let quota_info = state
         .credits_service
-        .get_credits_quota(identity.user_id)
+        .get_credits_quota_summary(identity.user_id)
         .await?;
 
     Ok(Json(CreditsQuotaResponse {
         account_tier: identity.account_tier,
         subscription_credits: quota_info.subscription_credits.clone(),
-        extra_credits: quota_info.extra_credits.clone(),
+        extra_credits: quota_info.extra_credits_total,
         total_credits: quota_info.total_credits,
     }))
 }

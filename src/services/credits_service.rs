@@ -68,7 +68,7 @@ impl CreditsService {
             metadata: Set(None),
         };
 
-        // Insert purchase atomically; if the transaction_id already exists, do nothing instead of erroring.
+        // Insert purchase idempotently
         entity::credits_events::Entity::insert(new_purchase)
             .on_conflict(
                 OnConflict::column(entity::credits_events::Column::TransactionId)
@@ -78,7 +78,6 @@ impl CreditsService {
             .exec(&txn)
             .await?;
 
-        // Check whether this purchase was inserted or already existed
         let persisted_purchase = entity::credits_events::Entity::find()
             .filter(entity::credits_events::Column::TransactionId.eq(transaction_id))
             .one(&txn)
@@ -90,16 +89,7 @@ impl CreditsService {
                 ))
             })?;
 
-        if persisted_purchase.id != purchase_id {
-            // Another transaction already created this record
-            txn.rollback().await?;
-            return Err(ApiError::Conflict(format!(
-                "Transaction {} already processed at {}",
-                transaction_id, persisted_purchase.verified_at
-            )));
-        }
-
-        // Successfully inserted - recalculate totals
+        // Recalculate totals (idempotent: same result if already existed)
         let total_extra = self.recalculate_extra_credits_txn(user_id, &txn).await?;
         txn.commit().await?;
 
@@ -108,7 +98,7 @@ impl CreditsService {
             user_id, transaction_id, amount, total_extra
         );
 
-        Ok((purchase_id, total_extra))
+        Ok((persisted_purchase.id, total_extra))
     }
 
     /// Record a new credit purchase within an existing transaction
@@ -152,7 +142,7 @@ impl CreditsService {
             metadata: Set(None),
         };
 
-        // Insert purchase atomically; if the transaction_id already exists, do nothing
+        // Insert purchase idempotently
         entity::credits_events::Entity::insert(new_purchase)
             .on_conflict(
                 OnConflict::column(entity::credits_events::Column::TransactionId)
@@ -162,7 +152,6 @@ impl CreditsService {
             .exec(txn)
             .await?;
 
-        // Check whether this purchase was inserted or already existed
         let persisted_purchase = entity::credits_events::Entity::find()
             .filter(entity::credits_events::Column::TransactionId.eq(transaction_id))
             .one(txn)
@@ -174,15 +163,7 @@ impl CreditsService {
                 ))
             })?;
 
-        if persisted_purchase.id != purchase_id {
-            // Another transaction already created this record
-            return Err(ApiError::Conflict(format!(
-                "Transaction {} already processed at {}",
-                transaction_id, persisted_purchase.verified_at
-            )));
-        }
-
-        // Successfully inserted - recalculate totals
+        // Recalculate totals (idempotent: same result if already existed)
         let total_extra = self.recalculate_extra_credits_txn(user_id, txn).await?;
 
         info!(
@@ -190,7 +171,7 @@ impl CreditsService {
             user_id, transaction_id, amount, total_extra
         );
 
-        Ok((purchase_id, total_extra))
+        Ok((persisted_purchase.id, total_extra))
     }
 
     /// Record a welcome bonus event within an existing transaction
@@ -229,26 +210,22 @@ impl CreditsService {
             metadata: Set(None),
         };
 
-        // Map uniqueness violations to a client-friendly error
-        let insert_result = entity::credits_events::Entity::insert(new_event)
-            .on_conflict(
-                OnConflict::column(entity::credits_events::Column::TransactionId)
-                    .do_nothing()
-                    .to_owned(),
-            )
-            .exec(txn)
-            .await;
-
-        if let Err(ref e) = insert_result {
-            let msg = e.to_string();
-            if msg.contains("unique") || msg.contains("duplicate") {
-                return Err(ApiError::BadRequest(
-                    "Welcome bonus already granted".to_string(),
-                ));
-            }
+        // First check if welcome bonus already exists
+        if let Some(existing) = entity::credits_events::Entity::find()
+            .filter(entity::credits_events::Column::TransactionId.eq(&transaction_id))
+            .one(txn)
+            .await?
+        {
+            return Err(ApiError::BadRequest(format!(
+                "Welcome bonus already granted at {}",
+                existing.verified_at
+            )));
         }
 
-        insert_result?;
+        // Insert welcome bonus - we've already verified it doesn't exist
+        entity::credits_events::Entity::insert(new_event)
+            .exec(txn)
+            .await?;
 
         let persisted = entity::credits_events::Entity::find()
             .filter(entity::credits_events::Column::TransactionId.eq(transaction_id))
@@ -261,11 +238,11 @@ impl CreditsService {
                 ))
             })?;
 
-        if persisted.id != event_id {
-            return Err(ApiError::BadRequest(
-                "Welcome bonus already granted".to_string(),
-            ));
-        }
+        // Verify we got the record we just inserted
+        assert_eq!(
+            persisted.id, event_id,
+            "Welcome bonus ID mismatch after insert"
+        );
 
         let total_extra = self.recalculate_extra_credits_txn(user_id, txn).await?;
 

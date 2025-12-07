@@ -692,7 +692,8 @@ components:
         subscriptionCredits:
           $ref: '#/components/schemas/SubscriptionCreditsInfo'
         extraCredits:
-          $ref: '#/components/schemas/ExtraCreditsInfo'
+          type: integer
+          description: Total extra credits remaining
         totalCredits:
           type: integer
           description: Total remaining credits (subscription + extra)
