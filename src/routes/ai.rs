@@ -50,6 +50,7 @@ pub async fn text_continue(
             &request.story_context,
             &request.path_nodes,
             &request.generation_params,
+            tier,
         )
         .await?;
 
@@ -123,6 +124,7 @@ pub async fn text_edit(
             request.story_context.as_ref(),
             &request.input,
             &request.edit_params,
+            tier,
         )
         .await?;
 

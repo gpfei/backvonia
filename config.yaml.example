@@ -1,0 +1,48 @@
+ai:
+  openrouter:
+    api_key: ${OPENROUTER_API_KEY}
+    api_base: https://openrouter.ai/api/v1
+    # referer: https://
+    app_title: Talevonia
+    request_timeout_ms: 60000
+    retry_attempts: 2
+    model_tiers:
+      premium:
+        # model: openrouter/openai/gpt-4o-mini
+        model: openai/gpt-oss-120b:free
+        max_context_tokens: 16000
+      standard:
+        # model: openrouter/openai/gpt-4o-mini
+        model: openai/gpt-oss-20b:free
+        max_context_tokens: 16000
+      light:
+        # model: openrouter/google/gemini-pro-1.5-flash
+        model: qwen/qwen3-235b-a22b:free
+        max_context_tokens: 16000
+    ai_routing:
+      fix_grammar:
+        free_default_tier: light
+        pro_default_tier: light
+        downgrade_over_chars: 2000
+      shorten:
+        free_default_tier: light
+        pro_default_tier: light
+        downgrade_over_chars: 2000
+      rewrite:
+        free_default_tier: standard
+        pro_default_tier: premium
+        downgrade_over_chars: 2500
+      ideas:
+        free_default_tier: standard
+        pro_default_tier: premium
+        downgrade_over_chars: 2500
+      continue:
+        free_default_tier: standard
+        pro_default_tier: premium
+        downgrade_over_chars: 2500
+      expand:
+        free_default_tier: standard
+        pro_default_tier: premium
+        downgrade_over_chars: 2500
+  # openai_api_key: ${OPENAI_API_KEY} # only needed for images
+

@@ -1,5 +1,5 @@
 use crate::{
-    config::AIConfig,
+    config::{AIConfig, ModelTierConfig, TaskRouting},
     error::{ApiError, Result},
     models::ai::{
         AITextContinueMode, AITextEditMode, EditInput, EditParams, GeneratedImage,
@@ -7,6 +7,8 @@ use crate::{
         StoryContextSimple, TextCandidate, TextEditCandidate,
     },
 };
+use entity::sea_orm_active_enums::AccountTier;
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use tracing::{info, instrument};
 use uuid::Uuid;
@@ -67,7 +69,9 @@ struct OpenAIImageData {
 impl AIService {
     pub fn new(config: &AIConfig) -> Self {
         let http_client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(60)) // 60s total timeout
+            .timeout(std::time::Duration::from_millis(
+                config.openrouter.request_timeout_ms,
+            ))
             .connect_timeout(std::time::Duration::from_secs(10)) // 10s connection timeout
             .build()
             .expect("Failed to build HTTP client");
@@ -78,14 +82,15 @@ impl AIService {
         }
     }
 
-    /// Generate text continuations using OpenAI
-    #[instrument(skip(self, context, nodes))]
+    /// Generate text continuations via OpenRouter
+    #[instrument(skip(self, context, nodes, account_tier))]
     pub async fn generate_text_continuations(
         &self,
         mode: AITextContinueMode,
         context: &StoryContext,
         nodes: &[PathNode],
         params: &GenerationParams,
+        account_tier: &AccountTier,
     ) -> Result<Vec<TextCandidate>> {
         // Build the prompt based on mode
         let (system_prompt, user_prompt) = match mode {
@@ -107,9 +112,13 @@ impl AIService {
             }
         };
 
-        // Prepare OpenAI request
+        // Choose model based on routing + size
+        let input_chars = user_prompt.len() + system_prompt.len();
+        let model = self.select_model(TaskKind::from(mode), account_tier, input_chars)?;
+
+        // Prepare request
         let request = OpenAIRequest {
-            model: "gpt-4".to_string(),
+            model: model.model.clone(),
             messages: vec![
                 OpenAIMessage {
                     role: "system".to_string(),
@@ -125,60 +134,99 @@ impl AIService {
             n: params.num_candidates,
         };
 
-        // Call OpenAI API
-        let response = self
-            .http_client
-            .post("https://api.openai.com/v1/chat/completions")
-            .header(
-                "Authorization",
-                format!("Bearer {}", self.config.openai_api_key),
-            )
-            .json(&request)
-            .send()
-            .await
-            .map_err(|e| ApiError::AIProvider(format!("OpenAI request failed: {}", e)))?;
+        // Call OpenRouter API
+        let mut attempts = 0;
+        let mut last_err = None;
+        while attempts <= self.config.openrouter.retry_attempts {
+            let mut builder = self
+                .http_client
+                .post(format!(
+                    "{}/chat/completions",
+                    self.config.openrouter.api_base
+                ))
+                .header(
+                    "Authorization",
+                    format!("Bearer {}", self.config.openrouter.api_key),
+                );
 
-        if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(ApiError::AIProvider(format!(
-                "OpenAI API error: {}",
-                error_text
-            )));
+            if let Some(ref referer) = self.config.openrouter.referer {
+                builder = builder.header("HTTP-Referer", referer);
+            }
+            if let Some(ref title) = self.config.openrouter.app_title {
+                builder = builder.header("X-Title", title);
+            }
+
+            let response = builder.json(&request).send().await;
+
+            match response {
+                Ok(resp) => {
+                    if !resp.status().is_success() {
+                        let status = resp.status();
+                        let text = resp.text().await.unwrap_or_default();
+                        if status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS {
+                            attempts += 1;
+                            last_err =
+                                Some(format!("OpenRouter error {}: {}", status.as_u16(), text));
+                            tokio::time::sleep(std::time::Duration::from_millis(
+                                200 * attempts as u64,
+                            ))
+                            .await;
+                            continue;
+                        }
+                        return Err(ApiError::AIProvider(format!(
+                            "OpenRouter error {}: {}",
+                            status.as_u16(),
+                            text
+                        )));
+                    }
+
+                    let openai_response: OpenAIResponse = resp.json().await.map_err(|e| {
+                        ApiError::AIProvider(format!("Failed to parse response: {}", e))
+                    })?;
+
+                    let candidates = openai_response
+                        .choices
+                        .into_iter()
+                        .map(|choice| {
+                            let content = choice.message.content;
+                            let (title, parsed_content) = if mode == AITextContinueMode::Ideas {
+                                self.parse_idea_response(&content)
+                            } else {
+                                (None, content)
+                            };
+
+                            TextCandidate {
+                                id: Uuid::new_v4().to_string(),
+                                content: parsed_content,
+                                title,
+                                safety_flags: vec![],
+                            }
+                        })
+                        .collect();
+
+                    info!(
+                        "Generated {} text continuations in mode {:?} using model {} (downgraded={}, attempts={})",
+                        params.num_candidates,
+                        mode,
+                        model.model,
+                        model.downgraded,
+                        attempts
+                    );
+
+                    return Ok(candidates);
+                }
+                Err(e) => {
+                    attempts += 1;
+                    last_err = Some(format!("OpenRouter request failed: {}", e));
+                    tokio::time::sleep(std::time::Duration::from_millis(200 * attempts as u64))
+                        .await;
+                }
+            }
         }
 
-        let openai_response: OpenAIResponse = response
-            .json()
-            .await
-            .map_err(|e| ApiError::AIProvider(format!("Failed to parse response: {}", e)))?;
-
-        // Convert to candidates
-        let candidates = openai_response
-            .choices
-            .into_iter()
-            .map(|choice| {
-                let content = choice.message.content;
-                let (title, parsed_content) = if mode == AITextContinueMode::Ideas {
-                    // Try to parse title from response
-                    self.parse_idea_response(&content)
-                } else {
-                    (None, content)
-                };
-
-                TextCandidate {
-                    id: Uuid::new_v4().to_string(),
-                    content: parsed_content,
-                    title,
-                    safety_flags: vec![],
-                }
-            })
-            .collect();
-
-        info!(
-            "Generated {} text continuations in mode {:?}",
-            params.num_candidates, mode
-        );
-
-        Ok(candidates)
+        Err(ApiError::AIProvider(
+            last_err.unwrap_or_else(|| "OpenRouter request failed".to_string()),
+        ))
     }
 
     /// Generate image using OpenAI DALL-E
@@ -189,6 +237,11 @@ impl AIService {
         node: &NodeContext,
         params: &ImageParams,
     ) -> Result<GeneratedImage> {
+        let openai_key = self
+            .config
+            .openai_api_key
+            .as_ref()
+            .ok_or_else(|| ApiError::AIProvider("OpenAI API key not configured".to_string()))?;
         // Build image prompt
         let prompt = self.build_image_prompt(context, node, params);
 
@@ -210,10 +263,7 @@ impl AIService {
         let response = self
             .http_client
             .post("https://api.openai.com/v1/images/generations")
-            .header(
-                "Authorization",
-                format!("Bearer {}", self.config.openai_api_key),
-            )
+            .header("Authorization", format!("Bearer {}", openai_key))
             .json(&request)
             .send()
             .await
@@ -367,21 +417,25 @@ impl AIService {
         (None, response.to_string())
     }
 
-    /// Generate text edit/transformation using OpenAI
-    #[instrument(skip(self, input, params))]
+    /// Generate text edit/transformation via OpenRouter
+    #[instrument(skip(self, input, params, account_tier))]
     pub async fn generate_text_edit(
         &self,
         mode: AITextEditMode,
         story_context: Option<&StoryContextSimple>,
         input: &EditInput,
         params: &EditParams,
+        account_tier: &AccountTier,
     ) -> Result<Vec<TextEditCandidate>> {
         let system_prompt = self.build_edit_system_prompt(mode);
         let user_prompt = self.build_edit_user_prompt(mode, story_context, input, params);
 
-        // Prepare OpenAI request with configurable number of candidates
+        let input_chars = system_prompt.len() + user_prompt.len();
+        let model = self.select_model(TaskKind::from(mode), account_tier, input_chars)?;
+
+        // Prepare request with configurable number of candidates
         let request = OpenAIRequest {
-            model: "gpt-4".to_string(),
+            model: model.model.clone(),
             messages: vec![
                 OpenAIMessage {
                     role: "system".to_string(),
@@ -397,49 +451,92 @@ impl AIService {
             n: params.num_candidates,
         };
 
-        // Call OpenAI API
-        let response = self
-            .http_client
-            .post("https://api.openai.com/v1/chat/completions")
-            .header(
-                "Authorization",
-                format!("Bearer {}", self.config.openai_api_key),
-            )
-            .json(&request)
-            .send()
-            .await
-            .map_err(|e| ApiError::AIProvider(format!("OpenAI edit request failed: {}", e)))?;
+        // Call OpenRouter API
+        let mut attempts = 0;
+        let mut last_err = None;
+        while attempts <= self.config.openrouter.retry_attempts {
+            let mut builder = self
+                .http_client
+                .post(format!(
+                    "{}/chat/completions",
+                    self.config.openrouter.api_base
+                ))
+                .header(
+                    "Authorization",
+                    format!("Bearer {}", self.config.openrouter.api_key),
+                );
 
-        if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(ApiError::AIProvider(format!(
-                "OpenAI edit API error: {}",
-                error_text
-            )));
+            if let Some(ref referer) = self.config.openrouter.referer {
+                builder = builder.header("HTTP-Referer", referer);
+            }
+            if let Some(ref title) = self.config.openrouter.app_title {
+                builder = builder.header("X-Title", title);
+            }
+
+            let response = builder.json(&request).send().await;
+
+            match response {
+                Ok(resp) => {
+                    if !resp.status().is_success() {
+                        let status = resp.status();
+                        let text = resp.text().await.unwrap_or_default();
+                        if status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS {
+                            attempts += 1;
+                            last_err = Some(format!(
+                                "OpenRouter edit error {}: {}",
+                                status.as_u16(),
+                                text
+                            ));
+                            tokio::time::sleep(std::time::Duration::from_millis(
+                                200 * attempts as u64,
+                            ))
+                            .await;
+                            continue;
+                        }
+                        return Err(ApiError::AIProvider(format!(
+                            "OpenRouter edit error {}: {}",
+                            status.as_u16(),
+                            text
+                        )));
+                    }
+
+                    let openai_response: OpenAIResponse = resp.json().await.map_err(|e| {
+                        ApiError::AIProvider(format!("Failed to parse edit response: {}", e))
+                    })?;
+
+                    let candidates = openai_response
+                        .choices
+                        .into_iter()
+                        .map(|choice| TextEditCandidate {
+                            id: Uuid::new_v4().to_string(),
+                            content: choice.message.content,
+                            safety_flags: vec![],
+                        })
+                        .collect();
+
+                    info!(
+                        "Generated {} edit candidates in mode {:?} using model {} (downgraded={}, attempts={})",
+                        params.num_candidates,
+                        mode,
+                        model.model,
+                        model.downgraded,
+                        attempts
+                    );
+
+                    return Ok(candidates);
+                }
+                Err(e) => {
+                    attempts += 1;
+                    last_err = Some(format!("OpenRouter edit request failed: {}", e));
+                    tokio::time::sleep(std::time::Duration::from_millis(200 * attempts as u64))
+                        .await;
+                }
+            }
         }
 
-        let openai_response: OpenAIResponse = response
-            .json()
-            .await
-            .map_err(|e| ApiError::AIProvider(format!("Failed to parse edit response: {}", e)))?;
-
-        // Convert to candidates
-        let candidates = openai_response
-            .choices
-            .into_iter()
-            .map(|choice| TextEditCandidate {
-                id: Uuid::new_v4().to_string(),
-                content: choice.message.content,
-                safety_flags: vec![],
-            })
-            .collect();
-
-        info!(
-            "Generated {} edit candidates in mode {:?}",
-            params.num_candidates, mode
-        );
-
-        Ok(candidates)
+        Err(ApiError::AIProvider(last_err.unwrap_or_else(|| {
+            "OpenRouter edit request failed".to_string()
+        })))
     }
 
     fn build_edit_system_prompt(&self, mode: AITextEditMode) -> String {
@@ -526,5 +623,95 @@ impl AIService {
         }
 
         prompt
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SelectedModel {
+    model: String,
+    max_context_tokens: u32,
+    downgraded: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum TaskKind {
+    FixGrammar,
+    Shorten,
+    Rewrite,
+    Ideas,
+    Continue,
+    Expand,
+}
+
+impl From<AITextContinueMode> for TaskKind {
+    fn from(mode: AITextContinueMode) -> Self {
+        match mode {
+            AITextContinueMode::Prose => TaskKind::Continue,
+            AITextContinueMode::Ideas => TaskKind::Ideas,
+        }
+    }
+}
+
+impl From<AITextEditMode> for TaskKind {
+    fn from(mode: AITextEditMode) -> Self {
+        match mode {
+            AITextEditMode::Expand => TaskKind::Expand,
+            AITextEditMode::Shorten => TaskKind::Shorten,
+            AITextEditMode::Rewrite => TaskKind::Rewrite,
+            AITextEditMode::FixGrammar => TaskKind::FixGrammar,
+        }
+    }
+}
+
+impl AIService {
+    fn select_model(
+        &self,
+        task: TaskKind,
+        account_tier: &AccountTier,
+        input_chars: usize,
+    ) -> Result<SelectedModel> {
+        let routing: &TaskRouting = match task {
+            TaskKind::FixGrammar => &self.config.openrouter.ai_routing.fix_grammar,
+            TaskKind::Shorten => &self.config.openrouter.ai_routing.shorten,
+            TaskKind::Rewrite => &self.config.openrouter.ai_routing.rewrite,
+            TaskKind::Ideas => &self.config.openrouter.ai_routing.ideas,
+            TaskKind::Continue => &self.config.openrouter.ai_routing.r#continue,
+            TaskKind::Expand => &self.config.openrouter.ai_routing.expand,
+        };
+
+        let mut tier_name = match account_tier {
+            AccountTier::Free => routing.free_default_tier.as_str(),
+            AccountTier::Pro => routing.pro_default_tier.as_str(),
+        };
+
+        let mut downgraded = false;
+        if let Some(threshold) = routing.downgrade_over_chars {
+            if input_chars > threshold {
+                downgraded = true;
+                tier_name = match tier_name {
+                    "premium" => "standard",
+                    "standard" => "light",
+                    other => other,
+                };
+            }
+        }
+
+        let tier_config: &ModelTierConfig = match tier_name {
+            "premium" => &self.config.openrouter.model_tiers.premium,
+            "standard" => &self.config.openrouter.model_tiers.standard,
+            "light" => &self.config.openrouter.model_tiers.light,
+            other => {
+                return Err(ApiError::AIProvider(format!(
+                    "Unknown model tier: {}",
+                    other
+                )))
+            }
+        };
+
+        Ok(SelectedModel {
+            model: tier_config.model.clone(),
+            max_context_tokens: tier_config.max_context_tokens,
+            downgraded,
+        })
     }
 }

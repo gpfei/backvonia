@@ -33,8 +33,69 @@ pub struct RedisConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AIConfig {
-    pub openai_api_key: String,
+    #[serde(default)]
+    pub openai_api_key: Option<String>,
+    #[serde(default)]
     pub anthropic_api_key: Option<String>,
+    #[serde(default = "default_openrouter_config")]
+    pub openrouter: OpenRouterConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct OpenRouterConfig {
+    pub api_key: String,
+    #[serde(default = "default_openrouter_base")]
+    pub api_base: String,
+    #[serde(default)]
+    pub referer: Option<String>,
+    #[serde(default)]
+    pub app_title: Option<String>,
+    #[serde(default = "default_model_tiers")]
+    pub model_tiers: ModelTiers,
+    #[serde(default = "default_ai_routing")]
+    pub ai_routing: AIRoutingConfig,
+    #[serde(default = "default_request_timeout_ms")]
+    pub request_timeout_ms: u64,
+    #[serde(default = "default_retry_attempts")]
+    pub retry_attempts: u8,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ModelTiers {
+    pub premium: ModelTierConfig,
+    pub standard: ModelTierConfig,
+    pub light: ModelTierConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ModelTierConfig {
+    pub model: String,
+    #[serde(default = "default_max_context_tokens")]
+    pub max_context_tokens: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AIRoutingConfig {
+    #[serde(default = "default_task_routing")]
+    pub fix_grammar: TaskRouting,
+    #[serde(default = "default_task_routing")]
+    pub shorten: TaskRouting,
+    #[serde(default = "default_task_routing_standard")]
+    pub rewrite: TaskRouting,
+    #[serde(default = "default_task_routing_standard")]
+    pub ideas: TaskRouting,
+    #[serde(default = "default_task_routing_standard")]
+    pub r#continue: TaskRouting,
+    #[serde(default = "default_task_routing_standard")]
+    pub expand: TaskRouting,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TaskRouting {
+    pub free_default_tier: String,
+    pub pro_default_tier: String,
+    #[serde(default)]
+    pub downgrade_over_chars: Option<usize>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -117,12 +178,87 @@ fn default_pro_image_limit() -> i32 {
     500 // 50 image generations
 }
 
+fn default_openrouter_base() -> String {
+    "https://openrouter.ai/api/v1".to_string()
+}
+
+fn default_request_timeout_ms() -> u64 {
+    60_000
+}
+
+fn default_retry_attempts() -> u8 {
+    2
+}
+
+fn default_max_context_tokens() -> u32 {
+    16_000
+}
+
+fn default_model_tiers() -> ModelTiers {
+    ModelTiers {
+        premium: ModelTierConfig {
+            model: "openrouter/openai/gpt-4o-mini".to_string(),
+            max_context_tokens: default_max_context_tokens(),
+        },
+        standard: ModelTierConfig {
+            model: "openrouter/openai/gpt-4o-mini".to_string(),
+            max_context_tokens: default_max_context_tokens(),
+        },
+        light: ModelTierConfig {
+            model: "openrouter/google/gemini-pro-1.5-flash".to_string(),
+            max_context_tokens: default_max_context_tokens(),
+        },
+    }
+}
+
+fn default_task_routing() -> TaskRouting {
+    TaskRouting {
+        free_default_tier: "light".to_string(),
+        pro_default_tier: "light".to_string(),
+        downgrade_over_chars: Some(2000),
+    }
+}
+
+fn default_task_routing_standard() -> TaskRouting {
+    TaskRouting {
+        free_default_tier: "standard".to_string(),
+        pro_default_tier: "premium".to_string(),
+        downgrade_over_chars: Some(2500),
+    }
+}
+
+fn default_ai_routing() -> AIRoutingConfig {
+    AIRoutingConfig {
+        fix_grammar: default_task_routing(),
+        shorten: default_task_routing(),
+        rewrite: default_task_routing_standard(),
+        ideas: default_task_routing_standard(),
+        r#continue: default_task_routing_standard(),
+        expand: default_task_routing_standard(),
+    }
+}
+
+fn default_openrouter_config() -> OpenRouterConfig {
+    OpenRouterConfig {
+        api_key: "set-openrouter-key".to_string(),
+        api_base: default_openrouter_base(),
+        referer: None,
+        app_title: None,
+        model_tiers: default_model_tiers(),
+        ai_routing: default_ai_routing(),
+        request_timeout_ms: default_request_timeout_ms(),
+        retry_attempts: default_retry_attempts(),
+    }
+}
+
 impl Config {
     pub fn load() -> Result<Self, config::ConfigError> {
         // Load .env file if it exists
         dotenvy::dotenv().ok();
 
         let config = config::Config::builder()
+            // Optional config files (common names)
+            .add_source(config::File::with_name("config").required(false))
             // Server
             .set_default("server.host", default_host())?
             .set_default("server.port", default_port())?
@@ -138,6 +274,16 @@ impl Config {
             // AI
             .set_override_option("ai.openai_api_key", env::var("OPENAI_API_KEY").ok())?
             .set_override_option("ai.anthropic_api_key", env::var("ANTHROPIC_API_KEY").ok())?
+            .set_override_option("ai.openrouter.api_key", env::var("OPENROUTER_API_KEY").ok())?
+            .set_override_option(
+                "ai.openrouter.api_base",
+                env::var("OPENROUTER_API_BASE").ok(),
+            )?
+            .set_override_option("ai.openrouter.referer", env::var("OPENROUTER_REFERER").ok())?
+            .set_override_option(
+                "ai.openrouter.app_title",
+                env::var("OPENROUTER_APP_TITLE").ok(),
+            )?
             // IAP
             .set_override_option(
                 "iap.apple_shared_secret",
