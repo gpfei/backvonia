@@ -82,9 +82,17 @@ fn truncate_body(body: &str, max_len: usize) -> String {
     if body.len() <= max_len {
         body.to_string()
     } else {
+        // Find the last valid UTF-8 character boundary at or before max_len
+        let truncate_at = body
+            .char_indices()
+            .take_while(|(idx, _)| *idx < max_len)
+            .last()
+            .map(|(idx, ch)| idx + ch.len_utf8())
+            .unwrap_or(0);
+
         format!(
             "{}...[truncated, {} bytes total]",
-            &body[..max_len],
+            &body[..truncate_at],
             body.len()
         )
     }
