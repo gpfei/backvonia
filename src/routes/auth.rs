@@ -3,7 +3,7 @@ use tracing::instrument;
 
 use crate::{
     app_state::AppState,
-    error::Result,
+    error::{AppJson, Result},
     middleware::UserIdentity,
     models::{
         auth::{
@@ -56,7 +56,7 @@ use crate::{
 #[instrument(skip(state, request))]
 pub async fn apple_sign_in(
     State(state): State<AppState>,
-    Json(request): Json<AppleSignInRequest>,
+    AppJson(request): AppJson<AppleSignInRequest>,
 ) -> Result<Json<AuthResponse>> {
     // Convert device_info if present
     let device_info = request.device_info.map(|d| d.into());
@@ -97,7 +97,7 @@ pub async fn apple_sign_in(
 #[instrument(skip(state, request))]
 pub async fn refresh_token(
     State(state): State<AppState>,
-    Json(request): Json<RefreshTokenRequest>,
+    AppJson(request): AppJson<RefreshTokenRequest>,
 ) -> Result<Json<RefreshTokenResponse>> {
     // Refresh access token
     let (access_token, expires_in) = state
@@ -131,7 +131,7 @@ pub async fn refresh_token(
 #[instrument(skip(state, request))]
 pub async fn logout(
     State(state): State<AppState>,
-    Json(request): Json<LogoutRequest>,
+    AppJson(request): AppJson<LogoutRequest>,
 ) -> Result<Json<LogoutResponse>> {
     // Revoke the refresh token
     state.auth_service.logout(&request.refresh_token).await?;

@@ -1,5 +1,6 @@
 use crate::models::common::ErrorResponse;
 use axum::{
+    extract::{rejection::JsonRejection, FromRequest, Request},
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
@@ -114,3 +115,41 @@ impl IntoResponse for ApiError {
 
 // Helper type for results
 pub type Result<T> = std::result::Result<T, ApiError>;
+
+/// Custom JSON extractor that returns proper JSON error responses on deserialization failures
+pub struct AppJson<T>(pub T);
+
+impl<T, S> FromRequest<S> for AppJson<T>
+where
+    T: serde::de::DeserializeOwned,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request(req: Request, state: &S) -> std::result::Result<Self, Self::Rejection> {
+        match Json::<T>::from_request(req, state).await {
+            Ok(Json(value)) => Ok(AppJson(value)),
+            Err(rejection) => {
+                let message = match rejection {
+                    JsonRejection::JsonDataError(err) => {
+                        format!(
+                            "Failed to deserialize the JSON body into the target type: {}",
+                            err
+                        )
+                    }
+                    JsonRejection::JsonSyntaxError(err) => {
+                        format!("Invalid JSON syntax: {}", err)
+                    }
+                    JsonRejection::MissingJsonContentType(err) => {
+                        format!("Missing JSON Content-Type header: {}", err)
+                    }
+                    JsonRejection::BytesRejection(err) => {
+                        format!("Failed to read request body: {}", err)
+                    }
+                    _ => format!("Invalid JSON request: {}", rejection),
+                };
+                Err(ApiError::BadRequest(message))
+            }
+        }
+    }
+}

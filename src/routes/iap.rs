@@ -5,7 +5,7 @@ use validator::Validate;
 
 use crate::{
     app_state::AppState,
-    error::{ApiError, Result},
+    error::{ApiError, AppJson, Result},
     middleware::UserIdentity,
     models::iap::{IAPLinkRequest, IAPLinkResponse},
 };
@@ -26,7 +26,7 @@ use crate::{
 pub async fn verify_iap(
     State(state): State<AppState>,
     identity: UserIdentity,
-    Json(request): Json<IAPLinkRequest>,
+    AppJson(request): AppJson<IAPLinkRequest>,
 ) -> Result<Json<IAPLinkResponse>> {
     use entity::{user_iap_receipts, users};
     use sea_orm::{ActiveModelTrait, EntityTrait, Set, TransactionTrait};

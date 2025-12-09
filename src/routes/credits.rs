@@ -4,7 +4,7 @@ use validator::Validate;
 
 use crate::{
     app_state::AppState,
-    error::{ApiError, Result},
+    error::{ApiError, AppJson, Result},
     middleware::UserIdentity,
     models::credits::{CreditPurchaseRequest, CreditPurchaseResponse, CreditsQuotaResponse},
 };
@@ -14,7 +14,7 @@ use crate::{
 pub async fn record_credit_purchase(
     State(state): State<AppState>,
     identity: UserIdentity,
-    Json(request): Json<CreditPurchaseRequest>,
+    AppJson(request): AppJson<CreditPurchaseRequest>,
 ) -> Result<Json<CreditPurchaseResponse>> {
     // Validate request
     request

@@ -3,7 +3,7 @@ use tracing::instrument;
 
 use crate::{
     app_state::AppState,
-    error::{ApiError, Result},
+    error::{ApiError, AppJson, Result},
     middleware::UserIdentity,
     models::{
         ai::{
@@ -21,7 +21,7 @@ use crate::{
 pub async fn text_continue(
     State(state): State<AppState>,
     identity: UserIdentity,
-    Json(request): Json<AITextContinueRequest>,
+    AppJson(request): AppJson<AITextContinueRequest>,
 ) -> Result<Json<AITextContinueResponse>> {
     // Validate request
     use validator::Validate;
@@ -68,7 +68,7 @@ pub async fn text_continue(
 pub async fn image_generate(
     State(state): State<AppState>,
     identity: UserIdentity,
-    Json(request): Json<AIImageGenerateRequest>,
+    AppJson(request): AppJson<AIImageGenerateRequest>,
 ) -> Result<Json<AIImageGenerateResponse>> {
     // Validate request
     use validator::Validate;
@@ -98,7 +98,7 @@ pub async fn image_generate(
 pub async fn text_edit(
     State(state): State<AppState>,
     identity: UserIdentity,
-    Json(request): Json<AITextEditRequest>,
+    AppJson(request): AppJson<AITextEditRequest>,
 ) -> Result<Json<AITextEditResponse>> {
     // Validate request
     use validator::Validate;
@@ -145,7 +145,7 @@ pub async fn text_edit(
 pub async fn text_ideas(
     State(state): State<AppState>,
     identity: UserIdentity,
-    Json(request): Json<AITextIdeasRequest>,
+    AppJson(request): AppJson<AITextIdeasRequest>,
 ) -> Result<Json<AITextContinueResponse>> {
     // Validate request
     use validator::Validate;
@@ -192,7 +192,7 @@ pub async fn text_ideas(
 pub async fn text_summarize(
     State(state): State<AppState>,
     identity: UserIdentity,
-    Json(request): Json<AITextSummarizeRequest>,
+    AppJson(request): AppJson<AITextSummarizeRequest>,
 ) -> Result<Json<AITextSummarizeResponse>> {
     // Validate request
     use validator::Validate;
