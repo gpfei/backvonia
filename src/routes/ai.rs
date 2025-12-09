@@ -9,7 +9,8 @@ use crate::{
         ai::{
             AIImageGenerateRequest, AIImageGenerateResponse, AITextContinueMode,
             AITextContinueRequest, AITextContinueResponse, AITextEditMode, AITextEditRequest,
-            AITextEditResponse, AITextIdeasRequest,
+            AITextEditResponse, AITextIdeasRequest, AITextSummarizeRequest,
+            AITextSummarizeResponse,
         },
         common::AIOperation,
     },
@@ -27,6 +28,16 @@ pub async fn text_continue(
     request
         .validate()
         .map_err(|e| ApiError::BadRequest(format!("Validation error: {}", e)))?;
+
+    // Ensure at least one node has content or summary
+    let has_content = request.path_nodes.iter().any(|node| {
+        !node.content.is_empty() || node.summary.as_ref().map_or(false, |s| !s.is_empty())
+    });
+    if !has_content {
+        return Err(ApiError::BadRequest(
+            "At least one node must have content or summary".to_string(),
+        ));
+    }
 
     let tier = &identity.account_tier;
 
@@ -142,6 +153,16 @@ pub async fn text_ideas(
         .validate()
         .map_err(|e| ApiError::BadRequest(format!("Validation error: {}", e)))?;
 
+    // Ensure at least one node has content or summary
+    let has_content = request.path_nodes.iter().any(|node| {
+        !node.content.is_empty() || node.summary.as_ref().map_or(false, |s| !s.is_empty())
+    });
+    if !has_content {
+        return Err(ApiError::BadRequest(
+            "At least one node must have content or summary".to_string(),
+        ));
+    }
+
     let tier = &identity.account_tier;
 
     // Atomically check and increment quota with weighted cost
@@ -164,4 +185,46 @@ pub async fn text_ideas(
         .await?;
 
     Ok(Json(AITextContinueResponse { candidates }))
+}
+
+/// POST /api/v1/ai/text/summarize
+#[instrument(skip(state, identity, request))]
+pub async fn text_summarize(
+    State(state): State<AppState>,
+    identity: UserIdentity,
+    Json(request): Json<AITextSummarizeRequest>,
+) -> Result<Json<AITextSummarizeResponse>> {
+    // Validate request
+    use validator::Validate;
+    request
+        .validate()
+        .map_err(|e| ApiError::BadRequest(format!("Validation error: {}", e)))?;
+
+    if request.nodes.is_empty() {
+        return Err(ApiError::BadRequest(
+            "At least one node required".to_string(),
+        ));
+    }
+
+    if request.nodes.len() > 20 {
+        return Err(ApiError::BadRequest(
+            "Maximum 20 nodes per request".to_string(),
+        ));
+    }
+
+    let tier = &identity.account_tier;
+
+    // Atomically check and increment quota - 1 credit per batch
+    state
+        .quota_service
+        .check_and_increment_quota_weighted(identity.user_id, tier, AIOperation::Summarize)
+        .await?;
+
+    // Generate summaries
+    let summaries = state
+        .ai_service
+        .generate_summaries(request.story_context.as_ref(), &request.nodes, tier)
+        .await?;
+
+    Ok(Json(AITextSummarizeResponse { summaries }))
 }

@@ -133,6 +133,7 @@ pub enum AIOperation {
     EditRewrite,
     EditFixGrammar,
     ImageGenerate,
+    Summarize,
 }
 
 impl AIOperation {
@@ -146,6 +147,7 @@ impl AIOperation {
             AIOperation::EditRewrite => 2,
             AIOperation::EditFixGrammar => 1,
             AIOperation::ImageGenerate => 10, // Images are more expensive
+            AIOperation::Summarize => 1,      // Batch summarization (up to 20 nodes)
         }
     }
 }

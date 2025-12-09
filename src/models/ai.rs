@@ -63,7 +63,7 @@ pub struct StoryContext {
 pub struct PathNode {
     #[validate(length(max = 200))]
     pub summary: Option<String>,
-    #[validate(length(min = 0, max = 50000))]
+    #[validate(length(max = 50000))]
     pub content: String,
 }
 
@@ -311,6 +311,40 @@ pub struct TextEditCandidate {
     pub safety_flags: Vec<String>,
 }
 
+/// AI Text Summarize Request
+#[derive(Debug, Deserialize, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct AITextSummarizeRequest {
+    #[serde(default)]
+    #[validate(nested)]
+    pub story_context: Option<StoryContextSimple>,
+    #[validate(length(min = 1), nested)]
+    pub nodes: Vec<NodeToSummarize>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeToSummarize {
+    #[validate(length(max = 100))]
+    pub node_id: String,
+    #[validate(length(min = 1, max = 50000))]
+    pub content: String,
+}
+
+/// AI Text Summarize Response
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AITextSummarizeResponse {
+    pub summaries: Vec<NodeSummary>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeSummary {
+    pub node_id: String,
+    pub summary: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,7 +352,7 @@ mod tests {
 
     fn base_request() -> AITextContinueRequest {
         AITextContinueRequest {
-            mode: AITextContinueMode::default(),
+            instructions: None,
             story_context: StoryContext {
                 title: Some("Test".to_string()),
                 tags: vec!["tag".to_string()],
@@ -333,13 +367,14 @@ mod tests {
     }
 
     #[test]
-    fn rejects_invalid_path_node_content() {
+    fn accepts_empty_chapter_node_content() {
         let mut request = base_request();
         request.path_nodes[0].content = "".to_string();
+        request.path_nodes[0].summary = Some("Chapter 1".to_string());
 
         assert!(
-            request.validate().is_err(),
-            "Empty path node content should fail validation"
+            request.validate().is_ok(),
+            "Empty chapter node content should be valid when summary exists"
         );
     }
 

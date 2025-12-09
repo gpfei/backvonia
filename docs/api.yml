@@ -186,6 +186,10 @@ paths:
       tags: [AI]
       summary: Generate AI text continuation candidates
       operationId: aiTextContinue
+      description: |
+        Generates story continuations as distinct branching paths.
+        
+        **Note:** PathNode content can be empty for chapter nodes, but at least one node must have content or summary.
       security:
         - BearerAuth: []
       parameters:
@@ -235,6 +239,10 @@ paths:
       tags: [AI]
       summary: Generate AI text continuation ideas
       operationId: aiTextIdeas
+      description: |
+        Generates high-level story continuation ideas as branching paths.
+        
+        **Note:** PathNode content can be empty for chapter nodes, but at least one node must have content or summary.
       security:
         - BearerAuth: []
       parameters:
@@ -303,6 +311,61 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AITextEditResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized - invalid or missing access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limited or quota exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /ai/text/summarize:
+    post:
+      tags: [AI]
+      summary: Generate concise summaries for story nodes
+      operationId: aiTextSummarize
+      description: |
+        Generates one-line summaries (max 50 characters) for multiple story nodes.
+        Useful for creating node summaries when they are missing, enabling more efficient
+        prompt construction in continue/ideas endpoints.
+        
+        **Cost:** 1 credit per batch (up to 20 nodes)
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XClientVersion'
+        - $ref: '#/components/parameters/XPlatform'
+        - $ref: '#/components/parameters/XDeviceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AITextSummarizeRequest'
+      responses:
+        '200':
+          description: Node summaries generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AITextSummarizeResponse'
         '400':
           description: Invalid request
           content:
@@ -1071,6 +1134,63 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AITextEditCandidate'
+
+    AITextSummarizeRequest:
+      type: object
+      properties:
+        storyContext:
+          type: object
+          nullable: true
+          properties:
+            title:
+              type: string
+            language:
+              type: string
+            tags:
+              type: array
+              items:
+                type: string
+          description: Optional story context for better summarization
+        nodes:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/NodeToSummarize'
+      required: [nodes]
+
+    NodeToSummarize:
+      type: object
+      properties:
+        nodeId:
+          type: string
+          description: Client-side node identifier (will be returned in response)
+          maxLength: 100
+        content:
+          type: string
+          description: Full node content to summarize
+          minLength: 1
+          maxLength: 50000
+      required: [nodeId, content]
+
+    AITextSummarizeResponse:
+      type: object
+      properties:
+        summaries:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeSummary'
+
+    NodeSummary:
+      type: object
+      properties:
+        nodeId:
+          type: string
+          description: Matches the nodeId from request
+        summary:
+          type: string
+          description: One-line summary (max 50 characters)
+          maxLength: 50
 
     AIImageGenerateRequest:
       type: object

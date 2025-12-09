@@ -3,8 +3,9 @@ use crate::{
     error::{ApiError, Result},
     models::ai::{
         AITextContinueMode, AITextEditMode, EditInput, EditParams, GeneratedImage,
-        GenerationParams, ImageParams, ImageStoryContext, NodeContext, PathNode, StoryContext,
-        StoryContextSimple, TextCandidate, TextEditCandidate,
+        GenerationParams, ImageParams, ImageStoryContext, NodeContext, NodeSummary,
+        NodeToSummarize, PathNode, StoryContext, StoryContextSimple, TextCandidate,
+        TextEditCandidate,
     },
 };
 use entity::sea_orm_active_enums::AccountTier;
@@ -97,7 +98,12 @@ impl AIService {
         let (system_prompt, mut user_prompt) = match mode {
             AITextContinueMode::Prose => {
                 let system = format!(
-                    "You are a creative writing assistant. Generate {} distinct story continuations in full prose.",
+                    "You are a creative writing assistant for Talevonia, a branching narrative app. \
+                    Generate {} distinctly different story continuations that could become separate branches. \
+                    Each continuation should present a different plot direction, character choice, or narrative possibility.\n\n\
+                    For each continuation, provide:\n\
+                    Summary: [one-line summary, max 50 characters]\n\
+                    Content: [full prose continuation]",
                     params.num_candidates
                 );
                 let user = self.build_text_prompt(context, nodes, params);
@@ -105,7 +111,15 @@ impl AIService {
             }
             AITextContinueMode::Ideas => {
                 let system = format!(
-                    "You are a creative writing assistant. Generate {} distinct high-level story continuation ideas or branch directions. For each idea, provide a brief title (3-8 words) and a short description (20-50 words).",
+                    "You are a creative writing assistant for Talevonia, a branching narrative app. \
+                    Generate {} high-level story continuation ideas that represent different branching paths. \
+                    Each idea should be a distinct narrative direction (character decision, plot twist, or setting change).\n\n\
+                    Format each idea as:\n\
+                    Title: [4-12 word summary]\n\
+                    [10-30 word description of this branch direction]\n\n\
+                    Example:\n\
+                    Title: Character enters the mysterious portal\n\
+                    A brave but risky choice leading to an unknown realm and new challenges.",
                     params.num_candidates
                 );
                 let user = self.build_ideas_prompt(context, nodes, params);
@@ -114,7 +128,7 @@ impl AIService {
         };
 
         if let Some(instr) = instructions {
-            user_prompt.push_str("\n\nAdditional instructions:\n");
+            user_prompt.push_str("\n\nAdditional guidance:\n");
             user_prompt.push_str(instr);
         }
 
@@ -136,7 +150,7 @@ impl AIService {
                 },
             ],
             max_tokens: (params.max_words * 2) as u32, // Rough token estimate
-            temperature: 0.8,
+            temperature: 0.7,
             n: params.num_candidates,
         };
 
@@ -190,13 +204,37 @@ impl AIService {
                         ApiError::AIProvider(format!("Failed to parse response: {}", e))
                     })?;
 
+                    info!(
+                        "AI vendor response: model={}, choices={}, mode={:?}",
+                        model.model,
+                        openai_response.choices.len(),
+                        mode
+                    );
+
+                    // Log first choice content for debugging (truncated)
+                    if let Some(first_choice) = openai_response.choices.first() {
+                        let preview: String = first_choice.message.content.chars().collect();
+                        info!(
+                            "AI vendor response preview (mode={:?}): {}...",
+                            mode, preview
+                        );
+                    }
+
                     let candidates = openai_response
                         .choices
                         .into_iter()
-                        .flat_map(|choice| {
+                        .enumerate()
+                        .flat_map(|(choice_idx, choice)| {
                             let content = choice.message.content;
+
                             if mode == AITextContinueMode::Ideas {
                                 let (title, parsed_content) = self.parse_idea_response(&content);
+                                info!(
+                                    "Parsed idea (choice {}): title={:?}, content_len={}",
+                                    choice_idx,
+                                    title,
+                                    parsed_content.len()
+                                );
                                 vec![TextCandidate {
                                     id: Uuid::new_v4().to_string(),
                                     content: parsed_content,
@@ -204,26 +242,55 @@ impl AIService {
                                     safety_flags: vec![],
                                 }]
                             } else {
-                                let splits = self.split_markdown_candidates(&content);
-                                if splits.len() > 1 {
-                                    splits
-                                        .into_iter()
-                                        .map(|(title, body)| TextCandidate {
-                                            id: Uuid::new_v4().to_string(),
-                                            content: body,
-                                            title,
-                                            safety_flags: vec![],
-                                        })
-                                        .collect()
-                                } else {
-                                    let parsed = content.trim().to_string();
-                                    let title = self.derive_title_from_content(&parsed);
+                                // Try to parse "Summary: xxx\nContent: yyy" format first
+                                let (summary, body) = self.parse_summary_content(&content);
+                                if let (Some(s), Some(b)) = (summary, body) {
+                                    info!(
+                                        "Parsed structured format (choice {}): summary=\"{}\", content_len={}",
+                                        choice_idx, s, b.len()
+                                    );
                                     vec![TextCandidate {
                                         id: Uuid::new_v4().to_string(),
-                                        content: parsed,
-                                        title,
+                                        content: b,
+                                        title: Some(s),
                                         safety_flags: vec![],
                                     }]
+                                } else {
+                                    // Fall back to splitting markdown candidates
+                                    info!(
+                                        "Structured format not found (choice {}), trying markdown split",
+                                        choice_idx
+                                    );
+                                    let splits = self.split_markdown_candidates(&content);
+                                    if splits.len() > 1 {
+                                        info!(
+                                            "Split into {} markdown sections (choice {})",
+                                            splits.len(),
+                                            choice_idx
+                                        );
+                                        splits
+                                            .into_iter()
+                                            .map(|(title, body)| TextCandidate {
+                                                id: Uuid::new_v4().to_string(),
+                                                content: body,
+                                                title,
+                                                safety_flags: vec![],
+                                            })
+                                            .collect()
+                                    } else {
+                                        info!(
+                                            "No structure detected (choice {}), using raw content with derived title",
+                                            choice_idx
+                                        );
+                                        let parsed = content.trim().to_string();
+                                        let title = self.derive_title_from_content(&parsed);
+                                        vec![TextCandidate {
+                                            id: Uuid::new_v4().to_string(),
+                                            content: parsed,
+                                            title,
+                                            safety_flags: vec![],
+                                        }]
+                                    }
                                 }
                             }
                         })
@@ -279,10 +346,16 @@ impl AIService {
 
         let request = OpenAIImageRequest {
             model: "dall-e-3".to_string(),
-            prompt,
+            prompt: prompt.clone(),
             n: 1,
             size: size.to_string(),
         };
+
+        info!(
+            "Generating image with DALL-E 3: size={}, prompt_len={}",
+            size,
+            prompt.len()
+        );
 
         // Call OpenAI API
         let response = self
@@ -307,6 +380,11 @@ impl AIService {
             .await
             .map_err(|e| ApiError::AIProvider(format!("Failed to parse image response: {}", e)))?;
 
+        info!(
+            "OpenAI image response: {} images returned",
+            image_response.data.len()
+        );
+
         let image_url = image_response
             .data
             .first()
@@ -325,7 +403,12 @@ impl AIService {
             (1024, 1024)
         };
 
-        info!("Generated image with DALL-E 3");
+        info!(
+            "Generated image with DALL-E 3: url_len={}, {}x{}",
+            image_url.len(),
+            width,
+            height
+        );
 
         Ok(GeneratedImage {
             url: image_url,
@@ -344,30 +427,75 @@ impl AIService {
     ) -> String {
         let mut prompt = String::new();
 
-        if let Some(title) = &context.title {
-            prompt.push_str(&format!("Story: {}\n\n", title));
-        }
+        prompt.push_str(&format!(
+            "Story: {}\n",
+            context.title.as_deref().unwrap_or("Untitled")
+        ));
+        prompt.push_str(&format!("Language: {}\n", context.language));
 
         if !context.tags.is_empty() {
-            prompt.push_str(&format!("Tags: {}\n\n", context.tags.join(", ")));
+            prompt.push_str(&format!("Genre/Tags: {}\n", context.tags.join(", ")));
         }
+        prompt.push_str("\n");
 
-        prompt.push_str("Previous story path:\n");
-        for (i, node) in nodes.iter().enumerate() {
-            prompt.push_str(&format!("{}. {}\n", i + 1, node.content));
+        // Optimize context: use summaries for earlier nodes, full content for recent ones
+        if nodes.len() > 5 {
+            let split_at = nodes.len() - 3;
+            let (earlier, recent) = nodes.split_at(split_at);
+
+            if !earlier.is_empty() {
+                prompt.push_str("Story so far:\n");
+                for (i, node) in earlier.iter().enumerate() {
+                    if let Some(summary) = &node.summary {
+                        if !summary.is_empty() {
+                            prompt.push_str(&format!("{}. {}\n", i + 1, summary));
+                        }
+                    } else if !node.content.is_empty() {
+                        // Fallback: use first 100 chars
+                        let preview: String = node.content.chars().take(100).collect();
+                        prompt.push_str(&format!("{}. {}...\n", i + 1, preview));
+                    }
+                    // Skip nodes with both empty summary and content (chapter nodes)
+                }
+                prompt.push_str("\n");
+            }
+
+            prompt.push_str("Recent events:\n");
+            for (i, node) in recent.iter().enumerate() {
+                if !node.content.is_empty() {
+                    prompt.push_str(&format!("{}. {}\n", split_at + i + 1, node.content));
+                } else if let Some(summary) = &node.summary {
+                    if !summary.is_empty() {
+                        prompt.push_str(&format!("{}. {}\n", split_at + i + 1, summary));
+                    }
+                }
+            }
+        } else {
+            prompt.push_str("Story so far:\n");
+            for (i, node) in nodes.iter().enumerate() {
+                if !node.content.is_empty() {
+                    prompt.push_str(&format!("{}. {}\n", i + 1, node.content));
+                } else if let Some(summary) = &node.summary {
+                    if !summary.is_empty() {
+                        prompt.push_str(&format!("{}. {}\n", i + 1, summary));
+                    }
+                }
+            }
         }
 
         prompt.push_str(&format!(
-            "\n\nGenerate a continuation of {}-{} words. ",
-            params.min_words, params.max_words
+            "\n\nGenerate {} different continuations ({}-{} words each). Each should offer a distinct narrative direction that could become a separate story branch.",
+            params.num_candidates,
+            params.min_words,
+            params.max_words
         ));
 
         if let Some(tone) = &params.tone {
-            prompt.push_str(&format!("Tone: {}. ", tone));
+            prompt.push_str(&format!(" Tone: {}.", tone));
         }
 
         if params.avoid_hard_end {
-            prompt.push_str("Keep the story open-ended for further continuation. ");
+            prompt.push_str(" Keep endings open for further branching.");
         }
 
         prompt
@@ -406,22 +534,69 @@ impl AIService {
     ) -> String {
         let mut prompt = String::new();
 
-        if let Some(title) = &context.title {
-            prompt.push_str(&format!("Story: {}\n\n", title));
-        }
+        prompt.push_str(&format!(
+            "Story: {}\n",
+            context.title.as_deref().unwrap_or("Untitled")
+        ));
+        prompt.push_str(&format!("Language: {}\n", context.language));
 
         if !context.tags.is_empty() {
-            prompt.push_str(&format!("Tags: {}\n\n", context.tags.join(", ")));
+            prompt.push_str(&format!("Genre: {}\n", context.tags.join(", ")));
+        }
+        prompt.push_str("\n");
+
+        // For ideas, use even more aggressive summarization
+        if nodes.len() > 3 {
+            let split_at = nodes.len() - 2;
+            let (earlier, recent) = nodes.split_at(split_at);
+
+            if !earlier.is_empty() {
+                prompt.push_str("Story context:\n");
+                for node in earlier {
+                    if let Some(summary) = &node.summary {
+                        if !summary.is_empty() {
+                            prompt.push_str(&format!("- {}\n", summary));
+                        }
+                    } else if !node.content.is_empty() {
+                        let preview: String = node.content.chars().take(80).collect();
+                        prompt.push_str(&format!("- {}...\n", preview));
+                    }
+                    // Skip empty chapter nodes
+                }
+                prompt.push_str("\n");
+            }
+
+            prompt.push_str("Current situation:\n");
+            for node in recent {
+                if let Some(summary) = &node.summary {
+                    if !summary.is_empty() {
+                        prompt.push_str(&format!("- {}\n", summary));
+                    }
+                } else if !node.content.is_empty() {
+                    let preview: String = node.content.chars().take(150).collect();
+                    prompt.push_str(&format!("- {}\n", preview));
+                }
+                // Skip empty chapter nodes
+            }
+        } else {
+            prompt.push_str("Story so far:\n");
+            for node in nodes {
+                if let Some(summary) = &node.summary {
+                    if !summary.is_empty() {
+                        prompt.push_str(&format!("- {}\n", summary));
+                    }
+                } else if !node.content.is_empty() {
+                    prompt.push_str(&format!("- {}\n", node.content));
+                }
+                // Skip empty chapter nodes
+            }
         }
 
-        prompt.push_str("Previous story path:\n");
-        for (i, node) in nodes.iter().enumerate() {
-            prompt.push_str(&format!("{}. {}\n", i + 1, node.content));
-        }
-
-        prompt.push_str(
-            "\n\nFor each continuation idea, format as:\nTitle: [brief title]\n[description]\n\n",
-        );
+        prompt.push_str(&format!(
+            "\n\nGenerate {} different continuation ideas. Each should suggest a distinct branch the story could take.\n\
+            Focus on: character decisions, plot directions, or setting changes.",
+            params.num_candidates
+        ));
 
         prompt
     }
@@ -455,6 +630,73 @@ impl AIService {
 
         // Final fallback: no title found
         (None, response.trim().to_string())
+    }
+
+    /// Parse response with "Summary: xxx\nContent: yyy" format
+    /// Handles both single and multiple structured continuations in one response
+    fn parse_summary_content(&self, response: &str) -> (Option<String>, Option<String>) {
+        // First check if there are multiple "Summary:" markers (AI put all continuations in one response)
+        let summary_count = response.matches("Summary:").count();
+
+        if summary_count > 1 {
+            // Multiple structured responses in one - this shouldn't happen with n>1, but handle it
+            info!(
+                "AI returned {} continuations in single choice (expected separate choices)",
+                summary_count
+            );
+            // Return None to trigger fallback parsing
+            return (None, None);
+        }
+
+        let lines: Vec<&str> = response.lines().collect();
+        let mut summary = None;
+        let mut content_start = 0;
+
+        // Look for "Summary:" line
+        for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            if trimmed.to_lowercase().starts_with("summary:") {
+                let sum = trimmed[8..].trim();
+                if !sum.is_empty() {
+                    summary = Some(sum.to_string());
+                }
+                content_start = i + 1;
+                break;
+            }
+        }
+
+        if summary.is_some() {
+            // Look for "Content:" line
+            for (i, line) in lines[content_start..].iter().enumerate() {
+                let trimmed = line.trim();
+                if trimmed.to_lowercase().starts_with("content:") {
+                    let remaining: Vec<&str> = lines[content_start + i + 1..].to_vec();
+                    let content = remaining.join("\n").trim().to_string();
+                    if !content.is_empty() {
+                        return (summary, Some(content));
+                    }
+                    // If "Content:" line has text on same line
+                    let inline = trimmed[8..].trim();
+                    if !inline.is_empty() {
+                        let mut full = inline.to_string();
+                        if !remaining.is_empty() {
+                            full.push('\n');
+                            full.push_str(&remaining.join("\n"));
+                        }
+                        return (summary, Some(full.trim().to_string()));
+                    }
+                }
+            }
+
+            // "Summary:" found but no "Content:" - treat rest as content
+            let remaining: Vec<&str> = lines[content_start..].to_vec();
+            let content = remaining.join("\n").trim().to_string();
+            if !content.is_empty() {
+                return (summary, Some(content));
+            }
+        }
+
+        (None, None)
     }
 
     fn derive_title_from_content(&self, content: &str) -> Option<String> {
@@ -593,13 +835,38 @@ impl AIService {
                         ApiError::AIProvider(format!("Failed to parse edit response: {}", e))
                     })?;
 
+                    info!(
+                        "AI vendor edit response: model={}, choices={}, mode={:?}",
+                        model.model,
+                        openai_response.choices.len(),
+                        mode
+                    );
+
+                    // Log first choice content preview
+                    if let Some(first_choice) = openai_response.choices.first() {
+                        let preview: String =
+                            first_choice.message.content.chars().take(150).collect();
+                        info!(
+                            "AI vendor edit response preview (mode={:?}): {}...",
+                            mode, preview
+                        );
+                    }
+
                     let candidates = openai_response
                         .choices
                         .into_iter()
-                        .map(|choice| TextEditCandidate {
-                            id: Uuid::new_v4().to_string(),
-                            content: choice.message.content,
-                            safety_flags: vec![],
+                        .enumerate()
+                        .map(|(idx, choice)| {
+                            info!(
+                                "Edit candidate {}: content_len={}",
+                                idx,
+                                choice.message.content.len()
+                            );
+                            TextEditCandidate {
+                                id: Uuid::new_v4().to_string(),
+                                content: choice.message.content,
+                                safety_flags: vec![],
+                            }
                         })
                         .collect();
 
@@ -713,6 +980,196 @@ impl AIService {
 
         prompt
     }
+
+    /// Generate summaries for multiple nodes
+    #[instrument(skip(self, _story_context, nodes, account_tier))]
+    pub async fn generate_summaries(
+        &self,
+        _story_context: Option<&StoryContextSimple>,
+        nodes: &[NodeToSummarize],
+        account_tier: &AccountTier,
+    ) -> Result<Vec<NodeSummary>> {
+        // Build system prompt
+        let system_prompt =
+            "You are a writing assistant that generates concise one-line summaries. \
+            Each summary should be max 50 characters and capture the key action or event.";
+
+        // Build user prompt
+        let mut user_prompt = String::new();
+        user_prompt.push_str("Generate a one-line summary (max 50 characters) for each text:\n\n");
+
+        for (i, node) in nodes.iter().enumerate() {
+            user_prompt.push_str(&format!("{}. {}\n\n", i + 1, node.content));
+        }
+
+        user_prompt.push_str("Format your response as:\n1. [summary]\n2. [summary]\n...");
+
+        let input_chars = system_prompt.len() + user_prompt.len();
+        let model = self.select_model(TaskKind::Summarize, account_tier, input_chars)?;
+
+        // Prepare request
+        let request = OpenAIRequest {
+            model: model.model.clone(),
+            messages: vec![
+                OpenAIMessage {
+                    role: "system".to_string(),
+                    content: system_prompt.to_string(),
+                },
+                OpenAIMessage {
+                    role: "user".to_string(),
+                    content: user_prompt,
+                },
+            ],
+            max_tokens: 500,
+            temperature: 0.5,
+            n: 1,
+        };
+
+        // Call OpenRouter API
+        let mut attempts = 0;
+        let mut last_err = None;
+        while attempts <= self.config.openrouter.retry_attempts {
+            let mut builder = self
+                .http_client
+                .post(format!(
+                    "{}/chat/completions",
+                    self.config.openrouter.api_base
+                ))
+                .header(
+                    "Authorization",
+                    format!("Bearer {}", self.config.openrouter.api_key),
+                );
+
+            if let Some(ref referer) = self.config.openrouter.referer {
+                builder = builder.header("HTTP-Referer", referer);
+            }
+            if let Some(ref title) = self.config.openrouter.app_title {
+                builder = builder.header("X-Title", title);
+            }
+
+            let response = builder.json(&request).send().await;
+
+            match response {
+                Ok(resp) => {
+                    if !resp.status().is_success() {
+                        let status = resp.status();
+                        let text = resp.text().await.unwrap_or_default();
+                        if status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS {
+                            attempts += 1;
+                            last_err = Some(format!(
+                                "OpenRouter summarize error {}: {}",
+                                status.as_u16(),
+                                text
+                            ));
+                            tokio::time::sleep(std::time::Duration::from_millis(
+                                200 * attempts as u64,
+                            ))
+                            .await;
+                            continue;
+                        }
+                        return Err(ApiError::AIProvider(format!(
+                            "OpenRouter summarize error {}: {}",
+                            status.as_u16(),
+                            text
+                        )));
+                    }
+
+                    let openai_response: OpenAIResponse = resp.json().await.map_err(|e| {
+                        ApiError::AIProvider(format!("Failed to parse summarize response: {}", e))
+                    })?;
+
+                    info!(
+                        "AI vendor summarize response: model={}, choices={}, nodes_count={}",
+                        model.model,
+                        openai_response.choices.len(),
+                        nodes.len()
+                    );
+
+                    let content = openai_response
+                        .choices
+                        .first()
+                        .map(|c| c.message.content.as_str())
+                        .unwrap_or("");
+
+                    // Log raw response
+                    info!(
+                        "AI vendor summarize raw response: {}",
+                        content.chars().take(300).collect::<String>()
+                    );
+
+                    // Parse numbered list
+                    let summaries = self.parse_numbered_summaries(content, nodes);
+
+                    info!(
+                        "Parsed {} summaries from response (expected {})",
+                        summaries.len(),
+                        nodes.len()
+                    );
+
+                    info!(
+                        "Generated {} summaries using model {} (downgraded={}, attempts={})",
+                        nodes.len(),
+                        model.model,
+                        model.downgraded,
+                        attempts
+                    );
+
+                    return Ok(summaries);
+                }
+                Err(e) => {
+                    attempts += 1;
+                    last_err = Some(format!("OpenRouter summarize request failed: {}", e));
+                    tokio::time::sleep(std::time::Duration::from_millis(200 * attempts as u64))
+                        .await;
+                }
+            }
+        }
+
+        Err(ApiError::AIProvider(last_err.unwrap_or_else(|| {
+            "OpenRouter summarize request failed".to_string()
+        })))
+    }
+
+    /// Parse numbered list of summaries
+    fn parse_numbered_summaries(
+        &self,
+        content: &str,
+        nodes: &[NodeToSummarize],
+    ) -> Vec<NodeSummary> {
+        let mut summaries = Vec::new();
+        let lines: Vec<&str> = content.lines().collect();
+
+        for (i, node) in nodes.iter().enumerate() {
+            let mut found = false;
+            let prefix = format!("{}.", i + 1);
+
+            for line in &lines {
+                let trimmed = line.trim();
+                if trimmed.starts_with(&prefix) {
+                    let summary = trimmed[prefix.len()..].trim().to_string();
+                    if !summary.is_empty() {
+                        summaries.push(NodeSummary {
+                            node_id: node.node_id.clone(),
+                            summary: summary.chars().take(50).collect(),
+                        });
+                        found = true;
+                        break;
+                    }
+                }
+            }
+
+            if !found {
+                // Fallback: generate from content
+                let fallback: String = node.content.chars().take(50).collect();
+                summaries.push(NodeSummary {
+                    node_id: node.node_id.clone(),
+                    summary: fallback,
+                });
+            }
+        }
+
+        summaries
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -730,6 +1187,7 @@ enum TaskKind {
     Ideas,
     Continue,
     Expand,
+    Summarize,
 }
 
 impl From<AITextContinueMode> for TaskKind {
@@ -766,6 +1224,7 @@ impl AIService {
             TaskKind::Ideas => &self.config.openrouter.ai_routing.ideas,
             TaskKind::Continue => &self.config.openrouter.ai_routing.r#continue,
             TaskKind::Expand => &self.config.openrouter.ai_routing.expand,
+            TaskKind::Summarize => &self.config.openrouter.ai_routing.fix_grammar, // Reuse light task
         };
 
         let mut tier_name = match account_tier {

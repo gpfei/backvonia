@@ -29,6 +29,7 @@ fn api_v1_routes(state: AppState) -> Router<AppState> {
         .route("/ai/text/continue", post(ai::text_continue))
         .route("/ai/text/ideas", post(ai::text_ideas))
         .route("/ai/text/edit", post(ai::text_edit))
+        .route("/ai/text/summarize", post(ai::text_summarize))
         .route("/ai/image/generate", post(ai::image_generate))
         .route_layer(middleware::from_fn(rate_limiter))
         .layer(middleware::from_fn_with_state(
