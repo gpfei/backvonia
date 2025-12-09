@@ -2,10 +2,9 @@ use crate::{
     config::{AIConfig, ModelTierConfig, TaskRouting},
     error::{ApiError, Result},
     models::ai::{
-        AITextContinueMode, AITextEditMode, EditInput, EditParams, GeneratedImage,
-        GenerationParams, ImageParams, ImageStoryContext, NodeContext, NodeSummary,
-        NodeToSummarize, PathNode, StoryContext, StoryContextSimple, TextCandidate,
-        TextEditCandidate,
+        AITextEditMode, EditInput, EditParams, GeneratedImage, GenerationParams, ImageParams,
+        ImageStoryContext, NodeContext, NodeSummary, NodeToSummarize, PathNode, StoryContext,
+        StoryContextSimple, TextCandidate, TextEditCandidate,
     },
 };
 use entity::sea_orm_active_enums::AccountTier;
@@ -26,6 +25,14 @@ struct OpenAIRequest {
     max_tokens: u32,
     temperature: f32,
     n: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_format: Option<ResponseFormat>,
+}
+
+#[derive(Debug, Serialize)]
+struct ResponseFormat {
+    #[serde(rename = "type")]
+    format_type: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -67,6 +74,18 @@ struct OpenAIImageData {
     url: String,
 }
 
+// JSON-structured response for continuations
+#[derive(Debug, Deserialize)]
+struct ContinuationsJsonResponse {
+    continuations: Vec<ContinuationItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ContinuationItem {
+    title: String,
+    content: String,
+}
+
 impl AIService {
     pub fn new(config: &AIConfig) -> Self {
         let http_client = reqwest::Client::builder()
@@ -81,244 +100,6 @@ impl AIService {
             config: config.clone(),
             http_client,
         }
-    }
-
-    /// Generate text continuations via OpenRouter
-    #[instrument(skip(self, context, nodes, account_tier))]
-    pub async fn generate_text_continuations(
-        &self,
-        mode: AITextContinueMode,
-        context: &StoryContext,
-        nodes: &[PathNode],
-        params: &GenerationParams,
-        instructions: Option<&str>,
-        account_tier: &AccountTier,
-    ) -> Result<Vec<TextCandidate>> {
-        // Build the prompt based on mode
-        let (system_prompt, mut user_prompt) = match mode {
-            AITextContinueMode::Prose => {
-                let system = format!(
-                    "You are a creative writing assistant for Talevonia, a branching narrative app. \
-                    Generate {} distinctly different story continuations that could become separate branches. \
-                    Each continuation should present a different plot direction, character choice, or narrative possibility.\n\n\
-                    For each continuation, provide:\n\
-                    Summary: [one-line summary, max 50 characters]\n\
-                    Content: [full prose continuation]",
-                    params.num_candidates
-                );
-                let user = self.build_text_prompt(context, nodes, params);
-                (system, user)
-            }
-            AITextContinueMode::Ideas => {
-                let system = format!(
-                    "You are a creative writing assistant for Talevonia, a branching narrative app. \
-                    Generate {} high-level story continuation ideas that represent different branching paths. \
-                    Each idea should be a distinct narrative direction (character decision, plot twist, or setting change).\n\n\
-                    Format each idea as:\n\
-                    Title: [4-12 word summary]\n\
-                    [10-30 word description of this branch direction]\n\n\
-                    Example:\n\
-                    Title: Character enters the mysterious portal\n\
-                    A brave but risky choice leading to an unknown realm and new challenges.",
-                    params.num_candidates
-                );
-                let user = self.build_ideas_prompt(context, nodes, params);
-                (system, user)
-            }
-        };
-
-        if let Some(instr) = instructions {
-            user_prompt.push_str("\n\nAdditional guidance:\n");
-            user_prompt.push_str(instr);
-        }
-
-        // Choose model based on routing + size
-        let input_chars = user_prompt.len() + system_prompt.len();
-        let model = self.select_model(TaskKind::from(mode), account_tier, input_chars)?;
-
-        // Prepare request
-        let request = OpenAIRequest {
-            model: model.model.clone(),
-            messages: vec![
-                OpenAIMessage {
-                    role: "system".to_string(),
-                    content: system_prompt,
-                },
-                OpenAIMessage {
-                    role: "user".to_string(),
-                    content: user_prompt,
-                },
-            ],
-            max_tokens: (params.max_words * 2) as u32, // Rough token estimate
-            temperature: 0.7,
-            n: params.num_candidates,
-        };
-
-        // Call OpenRouter API
-        let mut attempts = 0;
-        let mut last_err = None;
-        while attempts <= self.config.openrouter.retry_attempts {
-            let mut builder = self
-                .http_client
-                .post(format!(
-                    "{}/chat/completions",
-                    self.config.openrouter.api_base
-                ))
-                .header(
-                    "Authorization",
-                    format!("Bearer {}", self.config.openrouter.api_key),
-                );
-
-            if let Some(ref referer) = self.config.openrouter.referer {
-                builder = builder.header("HTTP-Referer", referer);
-            }
-            if let Some(ref title) = self.config.openrouter.app_title {
-                builder = builder.header("X-Title", title);
-            }
-
-            let response = builder.json(&request).send().await;
-
-            match response {
-                Ok(resp) => {
-                    if !resp.status().is_success() {
-                        let status = resp.status();
-                        let text = resp.text().await.unwrap_or_default();
-                        if status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS {
-                            attempts += 1;
-                            last_err =
-                                Some(format!("OpenRouter error {}: {}", status.as_u16(), text));
-                            tokio::time::sleep(std::time::Duration::from_millis(
-                                200 * attempts as u64,
-                            ))
-                            .await;
-                            continue;
-                        }
-                        return Err(ApiError::AIProvider(format!(
-                            "OpenRouter error {}: {}",
-                            status.as_u16(),
-                            text
-                        )));
-                    }
-
-                    let openai_response: OpenAIResponse = resp.json().await.map_err(|e| {
-                        ApiError::AIProvider(format!("Failed to parse response: {}", e))
-                    })?;
-
-                    info!(
-                        "AI vendor response: model={}, choices={}, mode={:?}",
-                        model.model,
-                        openai_response.choices.len(),
-                        mode
-                    );
-
-                    // Log first choice content for debugging (truncated)
-                    if let Some(first_choice) = openai_response.choices.first() {
-                        let preview: String = first_choice.message.content.chars().collect();
-                        info!(
-                            "AI vendor response preview (mode={:?}): {}...",
-                            mode, preview
-                        );
-                    }
-
-                    let candidates = openai_response
-                        .choices
-                        .into_iter()
-                        .enumerate()
-                        .flat_map(|(choice_idx, choice)| {
-                            let content = choice.message.content;
-
-                            if mode == AITextContinueMode::Ideas {
-                                let (title, parsed_content) = self.parse_idea_response(&content);
-                                info!(
-                                    "Parsed idea (choice {}): title={:?}, content_len={}",
-                                    choice_idx,
-                                    title,
-                                    parsed_content.len()
-                                );
-                                vec![TextCandidate {
-                                    id: Uuid::new_v4().to_string(),
-                                    content: parsed_content,
-                                    title,
-                                    safety_flags: vec![],
-                                }]
-                            } else {
-                                // Try to parse "Summary: xxx\nContent: yyy" format first
-                                let (summary, body) = self.parse_summary_content(&content);
-                                if let (Some(s), Some(b)) = (summary, body) {
-                                    info!(
-                                        "Parsed structured format (choice {}): summary=\"{}\", content_len={}",
-                                        choice_idx, s, b.len()
-                                    );
-                                    vec![TextCandidate {
-                                        id: Uuid::new_v4().to_string(),
-                                        content: b,
-                                        title: Some(s),
-                                        safety_flags: vec![],
-                                    }]
-                                } else {
-                                    // Fall back to splitting markdown candidates
-                                    info!(
-                                        "Structured format not found (choice {}), trying markdown split",
-                                        choice_idx
-                                    );
-                                    let splits = self.split_markdown_candidates(&content);
-                                    if splits.len() > 1 {
-                                        info!(
-                                            "Split into {} markdown sections (choice {})",
-                                            splits.len(),
-                                            choice_idx
-                                        );
-                                        splits
-                                            .into_iter()
-                                            .map(|(title, body)| TextCandidate {
-                                                id: Uuid::new_v4().to_string(),
-                                                content: body,
-                                                title,
-                                                safety_flags: vec![],
-                                            })
-                                            .collect()
-                                    } else {
-                                        info!(
-                                            "No structure detected (choice {}), using raw content with derived title",
-                                            choice_idx
-                                        );
-                                        let parsed = content.trim().to_string();
-                                        let title = self.derive_title_from_content(&parsed);
-                                        vec![TextCandidate {
-                                            id: Uuid::new_v4().to_string(),
-                                            content: parsed,
-                                            title,
-                                            safety_flags: vec![],
-                                        }]
-                                    }
-                                }
-                            }
-                        })
-                        .collect::<Vec<_>>();
-
-                    info!(
-                        "Generated {} text continuations in mode {:?} using model {} (downgraded={}, attempts={})",
-                        params.num_candidates,
-                        mode,
-                        model.model,
-                        model.downgraded,
-                        attempts
-                    );
-
-                    return Ok(candidates);
-                }
-                Err(e) => {
-                    attempts += 1;
-                    last_err = Some(format!("OpenRouter request failed: {}", e));
-                    tokio::time::sleep(std::time::Duration::from_millis(200 * attempts as u64))
-                        .await;
-                }
-            }
-        }
-
-        Err(ApiError::AIProvider(
-            last_err.unwrap_or_else(|| "OpenRouter request failed".to_string()),
-        ))
     }
 
     /// Generate image using OpenAI DALL-E
@@ -601,153 +382,6 @@ impl AIService {
         prompt
     }
 
-    /// Parse idea response to extract title and content
-    fn parse_idea_response(&self, response: &str) -> (Option<String>, String) {
-        // Try to extract title from "Title: xxx" pattern
-        if let Some(title_start) = response.find("Title:") {
-            let after_title = &response[title_start + 6..].trim();
-            if let Some(newline_pos) = after_title.find('\n') {
-                let title = after_title[..newline_pos].trim().to_string();
-                let content = after_title[newline_pos..].trim().to_string();
-                return (Some(title), content);
-            }
-        }
-
-        // Fallback: use first line as title if present
-        let mut lines = response.lines();
-        if let Some(first) = lines.next() {
-            let title = first.trim();
-            let remaining = lines.collect::<Vec<_>>().join("\n").trim().to_string();
-            if !title.is_empty() {
-                let content = if remaining.is_empty() {
-                    response.trim().to_string()
-                } else {
-                    remaining
-                };
-                return (Some(title.to_string()), content);
-            }
-        }
-
-        // Final fallback: no title found
-        (None, response.trim().to_string())
-    }
-
-    /// Parse response with "Summary: xxx\nContent: yyy" format
-    /// Handles both single and multiple structured continuations in one response
-    fn parse_summary_content(&self, response: &str) -> (Option<String>, Option<String>) {
-        // First check if there are multiple "Summary:" markers (AI put all continuations in one response)
-        let summary_count = response.matches("Summary:").count();
-
-        if summary_count > 1 {
-            // Multiple structured responses in one - this shouldn't happen with n>1, but handle it
-            info!(
-                "AI returned {} continuations in single choice (expected separate choices)",
-                summary_count
-            );
-            // Return None to trigger fallback parsing
-            return (None, None);
-        }
-
-        let lines: Vec<&str> = response.lines().collect();
-        let mut summary = None;
-        let mut content_start = 0;
-
-        // Look for "Summary:" line
-        for (i, line) in lines.iter().enumerate() {
-            let trimmed = line.trim();
-            if trimmed.to_lowercase().starts_with("summary:") {
-                let sum = trimmed[8..].trim();
-                if !sum.is_empty() {
-                    summary = Some(sum.to_string());
-                }
-                content_start = i + 1;
-                break;
-            }
-        }
-
-        if summary.is_some() {
-            // Look for "Content:" line
-            for (i, line) in lines[content_start..].iter().enumerate() {
-                let trimmed = line.trim();
-                if trimmed.to_lowercase().starts_with("content:") {
-                    let remaining: Vec<&str> = lines[content_start + i + 1..].to_vec();
-                    let content = remaining.join("\n").trim().to_string();
-                    if !content.is_empty() {
-                        return (summary, Some(content));
-                    }
-                    // If "Content:" line has text on same line
-                    let inline = trimmed[8..].trim();
-                    if !inline.is_empty() {
-                        let mut full = inline.to_string();
-                        if !remaining.is_empty() {
-                            full.push('\n');
-                            full.push_str(&remaining.join("\n"));
-                        }
-                        return (summary, Some(full.trim().to_string()));
-                    }
-                }
-            }
-
-            // "Summary:" found but no "Content:" - treat rest as content
-            let remaining: Vec<&str> = lines[content_start..].to_vec();
-            let content = remaining.join("\n").trim().to_string();
-            if !content.is_empty() {
-                return (summary, Some(content));
-            }
-        }
-
-        (None, None)
-    }
-
-    fn derive_title_from_content(&self, content: &str) -> Option<String> {
-        let first_line = content.lines().find(|line| !line.trim().is_empty())?;
-        let words: Vec<&str> = first_line.split_whitespace().take(8).collect();
-        if words.is_empty() {
-            None
-        } else {
-            Some(words.join(" "))
-        }
-    }
-
-    /// Split a response containing multiple markdown headings (e.g., "**续写一**") into candidates.
-    fn split_markdown_candidates(&self, content: &str) -> Vec<(Option<String>, String)> {
-        let mut results = Vec::new();
-        let mut current_title: Option<String> = None;
-        let mut current_body: Vec<String> = Vec::new();
-        let mut seen_heading = false;
-
-        for line in content.lines() {
-            let trimmed = line.trim();
-            let is_heading =
-                trimmed.starts_with("**") && trimmed.ends_with("**") && trimmed.len() > 4;
-
-            if is_heading {
-                // flush previous
-                if seen_heading && !current_body.is_empty() {
-                    let body = current_body.join("\n").trim().to_string();
-                    results.push((current_title.clone(), body));
-                    current_body.clear();
-                }
-                let title = trimmed.trim_matches('*').trim().to_string();
-                current_title = if title.is_empty() { None } else { Some(title) };
-                seen_heading = true;
-            } else {
-                current_body.push(trimmed.to_string());
-            }
-        }
-
-        if seen_heading && !current_body.is_empty() {
-            let body = current_body.join("\n").trim().to_string();
-            results.push((current_title.clone(), body));
-        }
-
-        if results.is_empty() {
-            vec![(None, content.trim().to_string())]
-        } else {
-            results
-        }
-    }
-
     /// Generate text edit/transformation via OpenRouter
     #[instrument(skip(self, input, params, account_tier))]
     pub async fn generate_text_edit(
@@ -780,6 +414,7 @@ impl AIService {
             max_tokens: 2000,
             temperature: 0.7,
             n: params.num_candidates,
+            response_format: None,
         };
 
         // Call OpenRouter API
@@ -1023,6 +658,7 @@ impl AIService {
             max_tokens: 500,
             temperature: 0.5,
             n: 1,
+            response_format: None,
         };
 
         // Call OpenRouter API
@@ -1190,15 +826,6 @@ enum TaskKind {
     Summarize,
 }
 
-impl From<AITextContinueMode> for TaskKind {
-    fn from(mode: AITextContinueMode) -> Self {
-        match mode {
-            AITextContinueMode::Prose => TaskKind::Continue,
-            AITextContinueMode::Ideas => TaskKind::Ideas,
-        }
-    }
-}
-
 impl From<AITextEditMode> for TaskKind {
     fn from(mode: AITextEditMode) -> Self {
         match mode {
@@ -1261,5 +888,273 @@ impl AIService {
             max_context_tokens: tier_config.max_context_tokens,
             downgraded,
         })
+    }
+
+    /// Generate prose story continuations using JSON-structured output
+    #[instrument(skip(self, context, nodes, account_tier))]
+    pub async fn generate_prose_continuations(
+        &self,
+        context: &StoryContext,
+        nodes: &[PathNode],
+        params: &GenerationParams,
+        instructions: Option<&str>,
+        account_tier: &AccountTier,
+    ) -> Result<Vec<TextCandidate>> {
+        // Build JSON-requesting prompt
+        let system_prompt = r#"You are a creative writing assistant for Talevonia, a branching narrative app.
+Return your response as a JSON object with this exact structure:
+{
+  "continuations": [
+    {
+      "title": "Brief 4-8 word summary",
+      "content": "Full prose continuation (follow word count requirements)"
+    }
+  ]
+}
+
+Each continuation should present a different plot direction, character choice, or narrative possibility."#.to_string();
+
+        let mut user_prompt = self.build_text_prompt(context, nodes, params);
+
+        user_prompt.push_str(&format!(
+            "\n\nGenerate {} distinctly different story continuations ({}-{} words each).",
+            params.num_candidates,
+            params.min_words,
+            params.max_words
+        ));
+
+        if let Some(tone) = &params.tone {
+            user_prompt.push_str(&format!(" Tone: {}.", tone));
+        }
+
+        if params.avoid_hard_end {
+            user_prompt.push_str(" Keep endings open for further branching.");
+        }
+
+        if let Some(instr) = instructions {
+            user_prompt.push_str("\n\nAdditional guidance:\n");
+            user_prompt.push_str(instr);
+        }
+
+        user_prompt.push_str("\n\nReturn the response in JSON format as specified.");
+
+        // Choose model
+        let input_chars = user_prompt.len() + system_prompt.len();
+        let model = self.select_model(TaskKind::Continue, account_tier, input_chars)?;
+
+        // Prepare request with JSON format
+        let request = OpenAIRequest {
+            model: model.model.clone(),
+            messages: vec![
+                OpenAIMessage {
+                    role: "system".to_string(),
+                    content: system_prompt,
+                },
+                OpenAIMessage {
+                    role: "user".to_string(),
+                    content: user_prompt,
+                },
+            ],
+            max_tokens: (params.max_words * params.num_candidates as u32 * 2) as u32,
+            temperature: 0.7,
+            n: 1,  // Single response with JSON array
+            response_format: Some(ResponseFormat {
+                format_type: "json_object".to_string(),
+            }),
+        };
+
+        // Call API with retry logic
+        let response_text = self.call_openrouter_api(request).await?;
+
+        // Parse JSON response
+        let json_response: ContinuationsJsonResponse = serde_json::from_str(&response_text)
+            .map_err(|e| {
+                ApiError::AIProvider(format!("Failed to parse JSON response: {}. Response: {}", e, response_text))
+            })?;
+
+        // Convert to TextCandidate
+        let candidates: Vec<TextCandidate> = json_response
+            .continuations
+            .into_iter()
+            .map(|item| TextCandidate {
+                id: Uuid::new_v4().to_string(),
+                content: item.content,
+                title: Some(item.title),
+                safety_flags: vec![],
+            })
+            .collect();
+
+        info!(
+            "Generated {} prose continuations using model {} (JSON format)",
+            candidates.len(),
+            model.model
+        );
+
+        Ok(candidates)
+    }
+
+    /// Generate high-level continuation ideas using JSON-structured output
+    #[instrument(skip(self, context, nodes, account_tier))]
+    pub async fn generate_continuation_ideas(
+        &self,
+        context: &StoryContext,
+        nodes: &[PathNode],
+        params: &GenerationParams,
+        instructions: Option<&str>,
+        account_tier: &AccountTier,
+    ) -> Result<Vec<TextCandidate>> {
+        // Build JSON-requesting prompt
+        let system_prompt = r#"You are a creative writing assistant for Talevonia, a branching narrative app.
+Return your response as a JSON object with this exact structure:
+{
+  "continuations": [
+    {
+      "title": "4-12 word summary of this branch direction",
+      "content": "20-50 word description of what happens in this branch"
+    }
+  ]
+}
+
+Each idea should suggest a distinct narrative direction: character decision, plot twist, or setting change."#.to_string();
+
+        let mut user_prompt = self.build_ideas_prompt(context, nodes, params);
+
+        user_prompt.push_str(&format!(
+            "\n\nGenerate {} different continuation ideas. Each should represent a distinct path the story could take.",
+            params.num_candidates
+        ));
+
+        if let Some(instr) = instructions {
+            user_prompt.push_str("\n\nAdditional guidance:\n");
+            user_prompt.push_str(instr);
+        }
+
+        user_prompt.push_str("\n\nReturn the response in JSON format as specified.");
+
+        // Choose model
+        let input_chars = user_prompt.len() + system_prompt.len();
+        let model = self.select_model(TaskKind::Ideas, account_tier, input_chars)?;
+
+        // Prepare request with JSON format
+        let request = OpenAIRequest {
+            model: model.model.clone(),
+            messages: vec![
+                OpenAIMessage {
+                    role: "system".to_string(),
+                    content: system_prompt,
+                },
+                OpenAIMessage {
+                    role: "user".to_string(),
+                    content: user_prompt,
+                },
+            ],
+            max_tokens: (100 * params.num_candidates as u32) as u32,  // ~50 words per idea
+            temperature: 0.8,  // Higher creativity for ideas
+            n: 1,  // Single response with JSON array
+            response_format: Some(ResponseFormat {
+                format_type: "json_object".to_string(),
+            }),
+        };
+
+        // Call API with retry logic
+        let response_text = self.call_openrouter_api(request).await?;
+
+        // Parse JSON response
+        let json_response: ContinuationsJsonResponse = serde_json::from_str(&response_text)
+            .map_err(|e| {
+                ApiError::AIProvider(format!("Failed to parse JSON response: {}. Response: {}", e, response_text))
+            })?;
+
+        // Convert to TextCandidate
+        let candidates: Vec<TextCandidate> = json_response
+            .continuations
+            .into_iter()
+            .map(|item| TextCandidate {
+                id: Uuid::new_v4().to_string(),
+                content: item.content,
+                title: Some(item.title),
+                safety_flags: vec![],
+            })
+            .collect();
+
+        info!(
+            "Generated {} continuation ideas using model {} (JSON format)",
+            candidates.len(),
+            model.model
+        );
+
+        Ok(candidates)
+    }
+
+    /// Helper function to call OpenRouter API with retry logic
+    async fn call_openrouter_api(&self, request: OpenAIRequest) -> Result<String> {
+        let mut attempts = 0;
+        let mut last_err = None;
+
+        while attempts <= self.config.openrouter.retry_attempts {
+            let mut builder = self
+                .http_client
+                .post(format!(
+                    "{}/chat/completions",
+                    self.config.openrouter.api_base
+                ))
+                .header(
+                    "Authorization",
+                    format!("Bearer {}", self.config.openrouter.api_key),
+                );
+
+            if let Some(ref referer) = self.config.openrouter.referer {
+                builder = builder.header("HTTP-Referer", referer);
+            }
+            if let Some(ref title) = self.config.openrouter.app_title {
+                builder = builder.header("X-Title", title);
+            }
+
+            let response = builder.json(&request).send().await;
+
+            match response {
+                Ok(resp) => {
+                    if !resp.status().is_success() {
+                        let status = resp.status();
+                        let text = resp.text().await.unwrap_or_default();
+                        if status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS {
+                            attempts += 1;
+                            last_err = Some(format!("OpenRouter error {}: {}", status.as_u16(), text));
+                            tokio::time::sleep(std::time::Duration::from_millis(
+                                200 * attempts as u64,
+                            ))
+                            .await;
+                            continue;
+                        }
+                        return Err(ApiError::AIProvider(format!(
+                            "OpenRouter error {}: {}",
+                            status.as_u16(),
+                            text
+                        )));
+                    }
+
+                    let openai_response: OpenAIResponse = resp.json().await.map_err(|e| {
+                        ApiError::AIProvider(format!("Failed to parse response: {}", e))
+                    })?;
+
+                    // Extract content from first choice
+                    if let Some(first_choice) = openai_response.choices.first() {
+                        return Ok(first_choice.message.content.clone());
+                    } else {
+                        return Err(ApiError::AIProvider("No choices in response".to_string()));
+                    }
+                }
+                Err(e) => {
+                    attempts += 1;
+                    last_err = Some(format!("OpenRouter request failed: {}", e));
+                    tokio::time::sleep(std::time::Duration::from_millis(200 * attempts as u64))
+                        .await;
+                }
+            }
+        }
+
+        Err(ApiError::AIProvider(
+            last_err.unwrap_or_else(|| "OpenRouter request failed".to_string()),
+        ))
     }
 }

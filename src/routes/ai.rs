@@ -7,10 +7,9 @@ use crate::{
     middleware::UserIdentity,
     models::{
         ai::{
-            AIImageGenerateRequest, AIImageGenerateResponse, AITextContinueMode,
-            AITextContinueRequest, AITextContinueResponse, AITextEditMode, AITextEditRequest,
-            AITextEditResponse, AITextIdeasRequest, AITextSummarizeRequest,
-            AITextSummarizeResponse,
+            AIImageGenerateRequest, AIImageGenerateResponse, AITextContinueRequest,
+            AITextContinueResponse, AITextEditMode, AITextEditRequest, AITextEditResponse,
+            AITextIdeasRequest, AITextSummarizeRequest, AITextSummarizeResponse,
         },
         common::AIOperation,
     },
@@ -47,11 +46,10 @@ pub async fn text_continue(
         .check_and_increment_quota_weighted(identity.user_id, tier, AIOperation::ContinueProse)
         .await?;
 
-    // Generate candidates
+    // Generate prose continuations using JSON-structured output
     let candidates = state
         .ai_service
-        .generate_text_continuations(
-            AITextContinueMode::Prose,
+        .generate_prose_continuations(
             &request.story_context,
             &request.path_nodes,
             &request.generation_params,
@@ -171,11 +169,10 @@ pub async fn text_ideas(
         .check_and_increment_quota_weighted(identity.user_id, tier, AIOperation::ContinueIdeas)
         .await?;
 
-    // Generate idea candidates
+    // Generate continuation ideas using JSON-structured output
     let candidates = state
         .ai_service
-        .generate_text_continuations(
-            AITextContinueMode::Ideas,
+        .generate_continuation_ideas(
             &request.story_context,
             &request.path_nodes,
             &request.generation_params,
