@@ -1243,6 +1243,19 @@ Each continuation should present a different plot direction, character choice, o
         let input_chars = user_prompt.len() + system_prompt.len();
         let model = self.select_model(TaskKind::Continue, account_tier, input_chars)?;
 
+        // Calculate max_tokens with proper overhead for JSON format
+        // Each continuation needs: title (10-20 tokens) + content (max_words * 1.5 tokens)
+        // Plus JSON structure overhead: ~50 tokens per item + 100 tokens for wrapper
+        // Increased multiplier from 1.5 to 2.0 to prevent truncation issues
+        let tokens_per_continuation = (params.max_words as f32 * 2.0) as u32 + 50; // content + title with buffer
+        let json_overhead = params.num_candidates as u32 * 80 + 150; // increased structure overhead
+        let max_tokens = tokens_per_continuation * params.num_candidates as u32 + json_overhead;
+
+        info!(
+            "Prose continuation request: model={}, max_words={}, num_candidates={}, calculated_max_tokens={}, tokens_per_item={}",
+            model.model, params.max_words, params.num_candidates, max_tokens, tokens_per_continuation
+        );
+
         // Prepare request with JSON format
         let request = OpenAIRequest {
             model: model.model.clone(),
@@ -1256,7 +1269,7 @@ Each continuation should present a different plot direction, character choice, o
                     content: user_prompt,
                 },
             ],
-            max_tokens: (params.max_words * params.num_candidates as u32 * 2) as u32,
+            max_tokens,
             temperature: 0.7,
             n: 1, // Single response with JSON array
             response_format: Some(ResponseFormat {
@@ -1331,6 +1344,19 @@ Each idea should suggest a distinct narrative direction: character decision, plo
         let input_chars = user_prompt.len() + system_prompt.len();
         let model = self.select_model(TaskKind::Ideas, account_tier, input_chars)?;
 
+        // Calculate max_tokens with proper overhead for JSON format
+        // Each continuation needs: title (15-25 tokens) + content (max_words * 1.5 tokens)
+        // Plus JSON structure overhead: ~50 tokens per item + 100 tokens for wrapper
+        // Increased multiplier from 1.5 to 2.0 to prevent truncation issues
+        let tokens_per_continuation = (params.max_words as f32 * 2.0) as u32 + 50; // content + title with buffer
+        let json_overhead = params.num_candidates as u32 * 80 + 150; // increased structure overhead
+        let max_tokens = tokens_per_continuation * params.num_candidates as u32 + json_overhead;
+
+        info!(
+            "Ideas request: model={}, max_words={}, num_candidates={}, calculated_max_tokens={}, tokens_per_item={}",
+            model.model, params.max_words, params.num_candidates, max_tokens, tokens_per_continuation
+        );
+
         // Prepare request with JSON format - calculate max_tokens based on params
         let request = OpenAIRequest {
             model: model.model.clone(),
@@ -1344,7 +1370,7 @@ Each idea should suggest a distinct narrative direction: character decision, plo
                     content: user_prompt,
                 },
             ],
-            max_tokens: (params.max_words * params.num_candidates as u32 * 2) as u32, // 2x for titles + JSON overhead
+            max_tokens,
             temperature: 0.8, // Higher creativity for ideas
             n: 1,             // Single response with JSON array
             response_format: Some(ResponseFormat {

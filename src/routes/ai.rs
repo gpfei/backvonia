@@ -52,7 +52,7 @@ pub async fn text_continue(
         .await?;
 
     // Generate prose continuations using JSON-structured output
-    let candidates = state
+    let generation_result = state
         .ai_service
         .generate_prose_continuations(
             &request.story_context,
@@ -61,9 +61,32 @@ pub async fn text_continue(
             request.instructions.as_deref(),
             tier,
         )
-        .await?;
+        .await;
 
-    Ok(Json(AITextContinueResponse { candidates }))
+    // Handle errors with credit refund
+    match generation_result {
+        Ok(candidates) => Ok(Json(AITextContinueResponse { candidates })),
+        Err(err) => {
+            // Refund credits after failed generation
+            if let Err(refund_err) = state
+                .quota_service
+                .refund_quota_weighted(identity.user_id, tier, AIOperation::ContinueProse)
+                .await
+            {
+                tracing::error!(
+                    user_id = %identity.user_id,
+                    error = %refund_err,
+                    "Failed to refund credits after text generation failure - user may have lost credits"
+                );
+            } else {
+                tracing::info!(
+                    user_id = %identity.user_id,
+                    "Successfully refunded credits after text generation failure"
+                );
+            }
+            Err(err)
+        }
+    }
 }
 
 /// POST /api/v1/ai/image/generate
@@ -240,7 +263,7 @@ pub async fn text_edit(
         .await?;
 
     // Generate edit candidates
-    let candidates = state
+    let generation_result = state
         .ai_service
         .generate_text_edit(
             request.mode,
@@ -249,12 +272,35 @@ pub async fn text_edit(
             &request.edit_params,
             tier,
         )
-        .await?;
+        .await;
 
-    Ok(Json(AITextEditResponse {
-        mode: request.mode,
-        candidates,
-    }))
+    // Handle errors with credit refund
+    match generation_result {
+        Ok(candidates) => Ok(Json(AITextEditResponse {
+            mode: request.mode,
+            candidates,
+        })),
+        Err(err) => {
+            // Refund credits after failed generation
+            if let Err(refund_err) = state
+                .quota_service
+                .refund_quota_weighted(identity.user_id, tier, operation)
+                .await
+            {
+                tracing::error!(
+                    user_id = %identity.user_id,
+                    error = %refund_err,
+                    "Failed to refund credits after text edit failure - user may have lost credits"
+                );
+            } else {
+                tracing::info!(
+                    user_id = %identity.user_id,
+                    "Successfully refunded credits after text edit failure"
+                );
+            }
+            Err(err)
+        }
+    }
 }
 
 /// POST /api/v1/ai/text/ideas
@@ -289,7 +335,7 @@ pub async fn text_ideas(
         .await?;
 
     // Generate continuation ideas using JSON-structured output
-    let candidates = state
+    let generation_result = state
         .ai_service
         .generate_continuation_ideas(
             &request.story_context,
@@ -298,9 +344,32 @@ pub async fn text_ideas(
             request.instructions.as_deref(),
             tier,
         )
-        .await?;
+        .await;
 
-    Ok(Json(AITextContinueResponse { candidates }))
+    // Handle errors with credit refund
+    match generation_result {
+        Ok(candidates) => Ok(Json(AITextContinueResponse { candidates })),
+        Err(err) => {
+            // Refund credits after failed generation
+            if let Err(refund_err) = state
+                .quota_service
+                .refund_quota_weighted(identity.user_id, tier, AIOperation::ContinueIdeas)
+                .await
+            {
+                tracing::error!(
+                    user_id = %identity.user_id,
+                    error = %refund_err,
+                    "Failed to refund credits after ideas generation failure - user may have lost credits"
+                );
+            } else {
+                tracing::info!(
+                    user_id = %identity.user_id,
+                    "Successfully refunded credits after ideas generation failure"
+                );
+            }
+            Err(err)
+        }
+    }
 }
 
 /// POST /api/v1/ai/text/summarize
@@ -337,10 +406,33 @@ pub async fn text_summarize(
         .await?;
 
     // Generate summaries
-    let summaries = state
+    let generation_result = state
         .ai_service
         .generate_summaries(request.story_context.as_ref(), &request.nodes, tier)
-        .await?;
+        .await;
 
-    Ok(Json(AITextSummarizeResponse { summaries }))
+    // Handle errors with credit refund
+    match generation_result {
+        Ok(summaries) => Ok(Json(AITextSummarizeResponse { summaries })),
+        Err(err) => {
+            // Refund credits after failed generation
+            if let Err(refund_err) = state
+                .quota_service
+                .refund_quota_weighted(identity.user_id, tier, AIOperation::Summarize)
+                .await
+            {
+                tracing::error!(
+                    user_id = %identity.user_id,
+                    error = %refund_err,
+                    "Failed to refund credits after summarize failure - user may have lost credits"
+                );
+            } else {
+                tracing::info!(
+                    user_id = %identity.user_id,
+                    "Successfully refunded credits after summarize failure"
+                );
+            }
+            Err(err)
+        }
+    }
 }

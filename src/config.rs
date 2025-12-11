@@ -131,19 +131,122 @@ pub struct QuotaConfig {
 
 impl Config {
     pub fn load() -> Result<Self, config::ConfigError> {
-        // Load .env file if it exists (for environment variable overrides)
+        // Load .env file first (this sets environment variables)
         dotenvy::dotenv().ok();
 
-        // Build config from config.yml (required) with environment variable overrides
+        // Build config - environment variables take precedence over config file
         let config = config::Config::builder()
-            // Load config.yml (REQUIRED)
-            .add_source(config::File::with_name("config").required(true))
-            // Allow environment variables to override config file
-            .add_source(
-                config::Environment::with_prefix("BACKVONIA")
-                    .separator("__")
-                    .try_parsing(true),
-            )
+            // Start with defaults from config.yaml (optional - allows running without config file)
+            .add_source(config::File::with_name("config").required(false))
+            // Server
+            // .set_default("server.host", default_host())?
+            // .set_default("server.port", default_port())?
+            .set_override_option("server.host", env::var("HOST").ok())?
+            .set_override_option(
+                "server.port",
+                env::var("PORT").ok().and_then(|v| v.parse::<u16>().ok()),
+            )?
+            // Database
+            .set_override_option("database.url", env::var("DATABASE_URL").ok())?
+            // Redis
+            .set_override_option("redis.url", env::var("REDIS_URL").ok())?
+            // AI
+            .set_override_option("ai.openai_api_key", env::var("OPENAI_API_KEY").ok())?
+            .set_override_option("ai.anthropic_api_key", env::var("ANTHROPIC_API_KEY").ok())?
+            .set_override_option("ai.openrouter.api_key", env::var("OPENROUTER_API_KEY").ok())?
+            .set_override_option(
+                "ai.openrouter.api_base",
+                env::var("OPENROUTER_API_BASE").ok(),
+            )?
+            .set_override_option("ai.openrouter.referer", env::var("OPENROUTER_REFERER").ok())?
+            .set_override_option(
+                "ai.openrouter.app_title",
+                env::var("OPENROUTER_APP_TITLE").ok(),
+            )?
+            // IAP
+            .set_override_option(
+                "iap.apple_shared_secret",
+                env::var("APPLE_SHARED_SECRET").ok(),
+            )?
+            .set_override_option("iap.apple_environment", env::var("APPLE_ENVIRONMENT").ok())?
+            .set_override_option(
+                "iap.google_service_account_key_path",
+                env::var("GOOGLE_SERVICE_ACCOUNT_KEY_PATH").ok(),
+            )?
+            // Auth
+            .set_override_option("auth.jwt_secret", env::var("JWT_SECRET").ok())?
+            .set_override_option(
+                "auth.access_token_expiration_minutes",
+                env::var("ACCESS_TOKEN_EXPIRATION_MINUTES")
+                    .ok()
+                    .and_then(|v| v.parse::<u64>().ok()),
+            )?
+            .set_override_option(
+                "auth.refresh_token_expiration_days",
+                env::var("REFRESH_TOKEN_EXPIRATION_DAYS")
+                    .ok()
+                    .and_then(|v| v.parse::<u64>().ok()),
+            )?
+            .set_override_option("auth.apple_client_id", env::var("APPLE_CLIENT_ID").ok())?
+            .set_override_option("auth.apple_team_id", env::var("APPLE_TEAM_ID").ok())?
+            .set_override_option(
+                "auth.welcome_bonus_amount",
+                env::var("WELCOME_BONUS_AMOUNT")
+                    .ok()
+                    .and_then(|v| v.parse::<i32>().ok()),
+            )?
+            // Application
+            .set_override_option("application.base_url", env::var("BASE_URL").ok())?
+            // Quota
+            .set_override_option(
+                "quota.free_text_daily_limit",
+                env::var("FREE_TEXT_DAILY_LIMIT")
+                    .ok()
+                    .and_then(|v| v.parse::<i32>().ok()),
+            )?
+            .set_override_option(
+                "quota.free_image_daily_limit",
+                env::var("FREE_IMAGE_DAILY_LIMIT")
+                    .ok()
+                    .and_then(|v| v.parse::<i32>().ok()),
+            )?
+            .set_override_option(
+                "quota.pro_text_daily_limit",
+                env::var("PRO_TEXT_DAILY_LIMIT")
+                    .ok()
+                    .and_then(|v| v.parse::<i32>().ok()),
+            )?
+            .set_override_option(
+                "quota.pro_image_daily_limit",
+                env::var("PRO_IMAGE_DAILY_LIMIT")
+                    .ok()
+                    .and_then(|v| v.parse::<i32>().ok()),
+            )?
+            // Storage
+            .set_override_option(
+                "storage.endpoint_url",
+                env::var("STORAGE_ENDPOINT_URL").ok(),
+            )?
+            .set_override_option(
+                "storage.access_key_id",
+                env::var("STORAGE_ACCESS_KEY_ID").ok(),
+            )?
+            .set_override_option(
+                "storage.secret_access_key",
+                env::var("STORAGE_SECRET_ACCESS_KEY").ok(),
+            )?
+            .set_override_option("storage.bucket_name", env::var("STORAGE_BUCKET_NAME").ok())?
+            .set_override_option("storage.region", env::var("STORAGE_REGION").ok())?
+            .set_override_option(
+                "storage.public_base_url",
+                env::var("STORAGE_PUBLIC_BASE_URL").ok(),
+            )?
+            .set_override_option(
+                "storage.signed_url_expiration_seconds",
+                env::var("STORAGE_SIGNED_URL_EXPIRATION_SECONDS")
+                    .ok()
+                    .and_then(|v| v.parse::<u64>().ok()),
+            )?
             .build()?;
 
         config.try_deserialize()

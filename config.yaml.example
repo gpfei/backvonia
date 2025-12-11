@@ -85,12 +85,3 @@ quota:
   free_image_daily_limit: 10
   pro_text_daily_limit: 5000
   pro_image_daily_limit: 500
-
-storage:
-  endpoint_url: ${STORAGE_ENDPOINT_URL}
-  access_key_id: ${STORAGE_ACCESS_KEY_ID}
-  secret_access_key: ${STORAGE_SECRET_ACCESS_KEY}
-  bucket_name: ${STORAGE_BUCKET_NAME}
-  region: auto
-  # public_base_url: ${STORAGE_PUBLIC_BASE_URL}  # Optional CDN URL
-  signed_url_expiration_seconds: 3600
