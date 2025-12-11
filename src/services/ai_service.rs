@@ -588,10 +588,11 @@ impl AIService {
 
         format!(
             r#"Story: {title}
-Language: {language}
 {tags}{background}{characters}
 {story_content}
-{generation_instructions}"#,
+{generation_instructions}
+
+Note: Continue in the same language as the story content. If you cannot detect the language, use {language}."#,
             title = title,
             language = language,
             tags = tags,
@@ -656,10 +657,11 @@ Language: {language}
 
         format!(
             r#"Story: {title}
-Language: {language}
 {tags}{background}{characters}
 {story_content}
-{generation_instructions}"#,
+{generation_instructions}
+
+Note: Generate ideas in the same language as the story content. If you cannot detect the language, use {language}."#,
             title = title,
             language = language,
             tags = tags,
@@ -849,9 +851,6 @@ Language: {language}
             if let Some(title) = &ctx.title {
                 prompt.push_str(&format!("Story: {}\n", title));
             }
-            if let Some(lang) = &ctx.language {
-                prompt.push_str(&format!("Language: {}\n", lang));
-            }
             if !ctx.tags.is_empty() {
                 prompt.push_str(&format!("Tags: {}\n", ctx.tags.join(", ")));
             }
@@ -896,9 +895,13 @@ Language: {language}
             }
         }
 
-        // Add language override if specified
+        // Add language hint if specified
         if let Some(lang) = &params.language {
-            prompt.push_str(&format!("\n\nLanguage: {}", lang));
+            prompt.push_str(&format!("\n\nNote: Respond in the same language as the input text. If you cannot detect the language, use {}.", lang));
+        } else if let Some(ctx) = story_context {
+            if let Some(lang) = &ctx.language {
+                prompt.push_str(&format!("\n\nNote: Respond in the same language as the input text. If you cannot detect the language, use {}.", lang));
+            }
         }
 
         prompt
@@ -921,6 +924,7 @@ Language: {language}
         let mut user_prompt = String::new();
 
         // Add story context if provided
+        let mut language_override: Option<&str> = None;
         if let Some(context) = story_context {
             if let Some(title) = &context.title {
                 if !title.is_empty() {
@@ -930,7 +934,7 @@ Language: {language}
 
             if let Some(language) = &context.language {
                 if !language.is_empty() {
-                    user_prompt.push_str(&format!("Language: {}\n", language));
+                    language_override = Some(language);
                 }
             }
 
@@ -950,6 +954,11 @@ Language: {language}
         }
 
         user_prompt.push_str("Format your response as:\n1. [summary]\n2. [summary]\n...");
+
+        // Add language hint at the end
+        if let Some(lang) = language_override {
+            user_prompt.push_str(&format!("\n\nNote: Generate summaries in the same language as the story content. If you cannot detect the language, use {}.", lang));
+        }
 
         let input_chars = system_prompt.len() + user_prompt.len();
         let model = self.select_model(TaskKind::Summarize, account_tier, input_chars)?;

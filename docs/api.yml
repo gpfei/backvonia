@@ -1366,8 +1366,7 @@ components:
               example: "The Echo Keeper"
             language:
               type: string
-              nullable: true
-              description: BCP-47 language code (optional - backend will auto-detect from title + content if not provided)
+              description: BCP-47 language code (user's app interface language, sent by client)
               example: "en"
             genre:
               type: string
@@ -1385,7 +1384,7 @@ components:
               description: Optional story setting for environment context (max 500 chars)
               maxLength: 500
               example: "A world where memories are stored in crystal towers"
-          required: [title]
+          required: [title, language]
         node:
           type: object
           properties:
