@@ -65,5 +65,11 @@ sha2 = "0.10"
 # JWT authentication
 jsonwebtoken = "9"
 
+# AWS SDK for S3 (Cloudflare R2 compatible)
+aws-config = "1"
+aws-sdk-s3 = "1"
+aws-credential-types = "1"
+aws-smithy-types = "1"
+
 [dev-dependencies]
 futures = "0.3"

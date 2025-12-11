@@ -45,6 +45,36 @@ pub struct AITextIdeasRequest {
     pub generation_params: GenerationParams,
 }
 
+/// Story background context (genre, tone, setting)
+#[derive(Debug, Deserialize, Serialize, Validate, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Background {
+    /// Genre/category (e.g., "Fantasy", "Sci-Fi", "Mystery")
+    #[validate(length(max = 100))]
+    pub genre: Option<String>,
+    /// Narrative tone (e.g., "Dark", "Humorous", "Suspenseful")
+    #[validate(length(max = 100))]
+    pub tone: Option<String>,
+    /// Setting description (e.g., "Medieval castle", "Space station")
+    #[validate(length(max = 500))]
+    pub setting: Option<String>,
+}
+
+/// Character in the story
+#[derive(Debug, Deserialize, Serialize, Validate, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Character {
+    /// Character name (required)
+    #[validate(length(min = 1, max = 100))]
+    pub name: String,
+    /// Character role (e.g., "Protagonist", "Antagonist", "Mentor")
+    #[validate(length(max = 100))]
+    pub role: Option<String>,
+    /// Character description (personality, appearance, background)
+    #[validate(length(max = 500))]
+    pub description: Option<String>,
+}
+
 #[derive(Debug, Deserialize, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct StoryContext {
@@ -56,6 +86,14 @@ pub struct StoryContext {
     #[serde(default = "default_language")]
     #[validate(length(min = 2, max = 10))]
     pub language: String,
+    /// Story background (genre, tone, setting)
+    #[serde(default)]
+    #[validate(nested)]
+    pub background: Option<Background>,
+    /// Active characters in this story (max 8)
+    #[serde(default)]
+    #[validate(length(max = 8), nested)]
+    pub active_characters: Option<Vec<Character>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
@@ -135,6 +173,54 @@ pub struct TextCandidate {
     pub safety_flags: Vec<String>,
 }
 
+/// Image generation style
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ImageStyle {
+    Storybook,
+    Anime,
+    DigitalArt,
+    Realistic,
+    Watercolor,
+    InkDrawing,
+    ClassicalIllustration,
+    Illustration,
+}
+
+impl Default for ImageStyle {
+    fn default() -> Self {
+        Self::Illustration
+    }
+}
+
+impl ImageStyle {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Storybook => "storybook",
+            Self::Anime => "anime",
+            Self::DigitalArt => "digital-art",
+            Self::Realistic => "realistic",
+            Self::Watercolor => "watercolor",
+            Self::InkDrawing => "ink-drawing",
+            Self::ClassicalIllustration => "classical-illustration",
+            Self::Illustration => "illustration",
+        }
+    }
+
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Storybook => "Book illustration style with whimsical, painterly qualities",
+            Self::Anime => "Anime/manga art style with expressive characters",
+            Self::DigitalArt => "Modern digital art with vibrant colors and clean lines",
+            Self::Realistic => "Photorealistic style with detailed textures",
+            Self::Watercolor => "Soft watercolor painting with flowing colors",
+            Self::InkDrawing => "Dramatic ink drawing with strong contrast",
+            Self::ClassicalIllustration => "Classical art illustration with renaissance aesthetics",
+            Self::Illustration => "General illustration style, versatile and balanced",
+        }
+    }
+}
+
 /// AI Image Generate Request
 #[derive(Debug, Deserialize, Validate)]
 #[serde(rename_all = "camelCase")]
@@ -148,14 +234,21 @@ pub struct AIImageGenerateRequest {
     pub image_params: ImageParams,
 }
 
+/// Story context for image generation
 #[derive(Debug, Deserialize, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageStoryContext {
     #[validate(length(max = 500))]
-    pub title: Option<String>,
+    pub title: String,
     #[serde(default = "default_language")]
     #[validate(length(min = 2, max = 10))]
     pub language: String,
+    #[validate(length(max = 100))]
+    pub genre: Option<String>,
+    #[validate(length(max = 100))]
+    pub tone: Option<String>,
+    #[validate(length(max = 500))]
+    pub setting: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Validate)]
@@ -163,18 +256,31 @@ pub struct ImageStoryContext {
 pub struct NodeContext {
     #[validate(length(max = 200))]
     pub summary: Option<String>,
-    #[validate(length(min = 1, max = 10000))]
-    pub content: String,
+    #[validate(length(max = 10000))]
+    pub content: Option<String>,
     #[serde(default)]
     #[validate(length(max = 20))]
     pub tags: Vec<String>,
 }
 
+impl NodeContext {
+    /// Validates that at least one of summary or content is non-empty
+    pub fn validate_has_content(&self) -> Result<(), &'static str> {
+        let has_summary = self.summary.as_ref().map_or(false, |s| !s.trim().is_empty());
+        let has_content = self.content.as_ref().map_or(false, |c| !c.trim().is_empty());
+
+        if !has_summary && !has_content {
+            return Err("Node must have summary or content");
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Deserialize, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageParams {
-    #[validate(length(max = 100))]
-    pub style: Option<String>,
+    #[serde(default)]
+    pub style: Option<ImageStyle>,
     #[serde(default = "default_aspect_ratio")]
     #[validate(length(min = 3, max = 10))]
     pub aspect_ratio: String,
@@ -186,7 +292,7 @@ pub struct ImageParams {
 impl Default for ImageParams {
     fn default() -> Self {
         Self {
-            style: None,
+            style: Some(ImageStyle::default()),
             aspect_ratio: default_aspect_ratio(),
             resolution: default_resolution(),
         }
@@ -357,6 +463,8 @@ mod tests {
                 title: Some("Test".to_string()),
                 tags: vec!["tag".to_string()],
                 language: "en".to_string(),
+                background: None,
+                active_characters: None,
             },
             path_nodes: vec![PathNode {
                 summary: Some("Summary".to_string()),

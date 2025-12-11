@@ -2,9 +2,10 @@ use crate::{
     config::{AIConfig, ModelTierConfig, TaskRouting},
     error::{ApiError, Result},
     models::ai::{
-        AITextEditMode, EditInput, EditParams, GeneratedImage, GenerationParams, ImageParams,
-        ImageStoryContext, NodeContext, NodeSummary, NodeToSummarize, PathNode, StoryContext,
-        StoryContextSimple, TextCandidate, TextEditCandidate,
+        AITextEditMode, Background, Character, EditInput, EditParams, GeneratedImage,
+        GenerationParams, ImageParams, ImageStoryContext, ImageStyle, NodeContext, NodeSummary,
+        NodeToSummarize, PathNode, StoryContext, StoryContextSimple, TextCandidate,
+        TextEditCandidate,
     },
 };
 use entity::sea_orm_active_enums::AccountTier;
@@ -62,6 +63,7 @@ struct OpenAIImageRequest {
     prompt: String,
     n: u8,
     size: String,
+    quality: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -109,20 +111,33 @@ impl AIService {
         context: &ImageStoryContext,
         node: &NodeContext,
         params: &ImageParams,
-    ) -> Result<GeneratedImage> {
+        account_tier: &AccountTier,
+    ) -> Result<(Vec<u8>, GeneratedImage)> {
         let openai_key = self
             .config
             .openai_api_key
             .as_ref()
             .ok_or_else(|| ApiError::AIProvider("OpenAI API key not configured".to_string()))?;
+
         // Build image prompt
         let prompt = self.build_image_prompt(context, node, params);
 
-        // Prepare size parameter
-        let size = match params.aspect_ratio.as_str() {
-            "16:9" => "1792x1024",
-            "3:4" => "1024x1792",
-            _ => "1024x1024",
+        // Determine size and quality based on resolution and tier
+        let (size, quality) = match params.resolution.as_str() {
+            "high" | "hd" => {
+                // Pro tier: HD quality with larger size
+                match params.aspect_ratio.as_str() {
+                    "3:4" => ("1536x2048", "hd"),
+                    _ => ("1024x1024", "hd"),
+                }
+            }
+            _ => {
+                // Free tier or medium: standard quality
+                match params.aspect_ratio.as_str() {
+                    "3:4" => ("768x1024", "standard"),
+                    _ => ("1024x1024", "standard"),
+                }
+            }
         };
 
         let request = OpenAIImageRequest {
@@ -130,11 +145,13 @@ impl AIService {
             prompt: prompt.clone(),
             n: 1,
             size: size.to_string(),
+            quality: quality.to_string(),
         };
 
         info!(
-            "Generating image with DALL-E 3: size={}, prompt_len={}",
+            "Generating image with DALL-E 3: size={}, quality={}, prompt_len={}",
             size,
+            quality,
             prompt.len()
         );
 
@@ -144,6 +161,7 @@ impl AIService {
             .post("https://api.openai.com/v1/images/generations")
             .header("Authorization", format!("Bearer {}", openai_key))
             .json(&request)
+            .timeout(std::time::Duration::from_secs(60))
             .send()
             .await
             .map_err(|e| ApiError::AIProvider(format!("OpenAI image request failed: {}", e)))?;
@@ -173,6 +191,29 @@ impl AIService {
             .url
             .clone();
 
+        // Download the generated image
+        info!("Downloading generated image from: {}", image_url);
+        let image_response = self
+            .http_client
+            .get(&image_url)
+            .timeout(std::time::Duration::from_secs(30))
+            .send()
+            .await
+            .map_err(|e| ApiError::AIProvider(format!("Failed to download image: {}", e)))?;
+
+        if !image_response.status().is_success() {
+            return Err(ApiError::AIProvider(format!(
+                "Image download failed with status: {}",
+                image_response.status()
+            )));
+        }
+
+        let image_bytes = image_response
+            .bytes()
+            .await
+            .map_err(|e| ApiError::AIProvider(format!("Failed to read image bytes: {}", e)))?
+            .to_vec();
+
         // Parse size dimensions
         let (width, height) = if size.contains('x') {
             let parts: Vec<&str> = size.split('x').collect();
@@ -185,101 +226,345 @@ impl AIService {
         };
 
         info!(
-            "Generated image with DALL-E 3: url_len={}, {}x{}",
-            image_url.len(),
+            "Generated and downloaded image: {}x{}, {} bytes",
             width,
-            height
+            height,
+            image_bytes.len()
         );
 
-        Ok(GeneratedImage {
-            url: image_url,
+        let generated_image = GeneratedImage {
+            url: String::new(), // Will be replaced with storage URL by caller
             mime_type: "image/png".to_string(),
             width,
             height,
-        })
+        };
+
+        Ok((image_bytes, generated_image))
     }
 
-    /// Build prompt for text generation
+    // ==================== Prompt Section Formatters ====================
+
+    /// Format background section for prompts
+    fn format_background_section(bg: &Option<Background>) -> String {
+        bg.as_ref()
+            .and_then(|b| {
+                let mut lines = Vec::new();
+
+                if let Some(genre) = &b.genre {
+                    if !genre.is_empty() {
+                        lines.push(format!("- Genre: {}", genre));
+                    }
+                }
+
+                if let Some(tone) = &b.tone {
+                    if !tone.is_empty() {
+                        lines.push(format!("- Tone: {}", tone));
+                    }
+                }
+
+                if let Some(setting) = &b.setting {
+                    if !setting.is_empty() {
+                        lines.push(format!("- Setting: {}", setting));
+                    }
+                }
+
+                if lines.is_empty() {
+                    None
+                } else {
+                    Some(format!("\nBackground:\n{}\n", lines.join("\n")))
+                }
+            })
+            .unwrap_or_default()
+    }
+
+    /// Format characters section for prompts (full detail)
+    fn format_characters_section(chars: &Option<Vec<Character>>) -> String {
+        chars
+            .as_ref()
+            .and_then(|characters| {
+                if characters.is_empty() {
+                    return None;
+                }
+
+                let mut lines = Vec::new();
+                for character in characters {
+                    let mut char_line = format!("- {}", character.name);
+
+                    if let Some(role) = &character.role {
+                        if !role.is_empty() {
+                            char_line.push_str(&format!(" ({})", role));
+                        }
+                    }
+
+                    lines.push(char_line);
+
+                    if let Some(desc) = &character.description {
+                        if !desc.is_empty() {
+                            lines.push(format!("  {}", desc));
+                        }
+                    }
+                }
+
+                Some(format!("\nCharacters:\n{}\n", lines.join("\n")))
+            })
+            .unwrap_or_default()
+    }
+
+    /// Format characters section for ideas prompts (compact)
+    fn format_characters_compact(chars: &Option<Vec<Character>>) -> String {
+        chars
+            .as_ref()
+            .and_then(|characters| {
+                if characters.is_empty() {
+                    return None;
+                }
+
+                let names: Vec<String> = characters
+                    .iter()
+                    .map(|c| {
+                        if let Some(role) = &c.role {
+                            if !role.is_empty() {
+                                return format!("{} ({})", c.name, role);
+                            }
+                        }
+                        c.name.clone()
+                    })
+                    .collect();
+
+                Some(format!("Characters: {}\n", names.join(", ")))
+            })
+            .unwrap_or_default()
+    }
+
+    /// Format background section for ideas prompts (compact)
+    fn format_background_compact(bg: &Option<Background>) -> String {
+        bg.as_ref()
+            .and_then(|b| {
+                let parts: Vec<String> = vec![
+                    b.genre.as_ref().filter(|s| !s.is_empty()).cloned(),
+                    b.tone.as_ref().filter(|s| !s.is_empty()).cloned(),
+                    b.setting.as_ref().filter(|s| !s.is_empty()).cloned(),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+
+                if parts.is_empty() {
+                    None
+                } else {
+                    Some(format!("Background: {}\n", parts.join(", ")))
+                }
+            })
+            .unwrap_or_default()
+    }
+
+    /// Format story content from nodes (full detail for prose)
+    fn format_story_content_detailed(nodes: &[PathNode]) -> String {
+        if nodes.len() > 5 {
+            let split_at = nodes.len() - 3;
+            let (earlier, recent) = nodes.split_at(split_at);
+
+            let mut content = String::new();
+
+            if !earlier.is_empty() {
+                content.push_str("Story so far:\n");
+                for (i, node) in earlier.iter().enumerate() {
+                    if let Some(summary) = &node.summary {
+                        if !summary.is_empty() {
+                            content.push_str(&format!("{}. {}\n", i + 1, summary));
+                        }
+                    } else if !node.content.is_empty() {
+                        let preview: String = node.content.chars().take(100).collect();
+                        content.push_str(&format!("{}. {}...\n", i + 1, preview));
+                    }
+                }
+                content.push_str("\n");
+            }
+
+            content.push_str("Recent events:\n");
+            for node in recent {
+                if !node.content.is_empty() {
+                    content.push_str(&format!("{}\n\n", node.content));
+                }
+            }
+
+            content
+        } else {
+            let mut content = String::from("Story so far:\n");
+            for node in nodes {
+                if !node.content.is_empty() {
+                    content.push_str(&format!("{}\n\n", node.content));
+                }
+            }
+            content
+        }
+    }
+
+    /// Format story content from nodes (summarized for ideas)
+    fn format_story_content_summary(nodes: &[PathNode]) -> String {
+        let mut content = String::new();
+
+        if nodes.len() > 3 {
+            let split_at = nodes.len() - 2;
+            let (earlier, recent) = nodes.split_at(split_at);
+
+            if !earlier.is_empty() {
+                content.push_str("Story context:\n");
+                for node in earlier {
+                    if let Some(summary) = &node.summary {
+                        if !summary.is_empty() {
+                            content.push_str(&format!("- {}\n", summary));
+                        }
+                    } else if !node.content.is_empty() {
+                        let preview: String = node.content.chars().take(80).collect();
+                        content.push_str(&format!("- {}...\n", preview));
+                    }
+                }
+                content.push_str("\n");
+            }
+
+            content.push_str("Current situation:\n");
+            for node in recent {
+                if let Some(summary) = &node.summary {
+                    if !summary.is_empty() {
+                        content.push_str(&format!("- {}\n", summary));
+                    }
+                } else if !node.content.is_empty() {
+                    let preview: String = node.content.chars().take(150).collect();
+                    content.push_str(&format!("- {}\n", preview));
+                }
+            }
+        } else {
+            content.push_str("Story so far:\n");
+            for node in nodes {
+                if let Some(summary) = &node.summary {
+                    if !summary.is_empty() {
+                        content.push_str(&format!("- {}\n", summary));
+                    }
+                } else if !node.content.is_empty() {
+                    content.push_str(&format!("- {}\n", node.content));
+                }
+            }
+        }
+
+        content
+    }
+
+    /// Format generation instructions for prose
+    fn format_prose_instructions(
+        params: &GenerationParams,
+        instructions: Option<&str>,
+        has_context: bool,
+    ) -> String {
+        let mut inst = format!(
+            "Generate {} different prose continuations ({}-{} words each).\n",
+            params.num_candidates, params.min_words, params.max_words
+        );
+
+        if has_context {
+            inst.push_str("Consider the established characters, tone, and setting.\n");
+        }
+
+        if let Some(tone) = &params.tone {
+            inst.push_str(&format!("Tone: {}\n", tone));
+        }
+
+        if params.avoid_hard_end {
+            inst.push_str("Avoid definitive endings; leave room for further branches.\n");
+        }
+
+        if let Some(user_inst) = instructions {
+            inst.push_str(&format!("\nAdditional instructions: {}\n", user_inst));
+        }
+
+        inst
+    }
+
+    /// Format focus areas for ideas generation
+    fn format_ideas_focus(chars: &Option<Vec<Character>>) -> String {
+        if let Some(characters) = chars {
+            if !characters.is_empty() {
+                let names: Vec<&str> = characters.iter().map(|c| c.name.as_str()).collect();
+                return format!(
+                    "{} decisions, plot directions, or setting changes",
+                    names.join("/")
+                );
+            }
+        }
+        "character decisions, plot directions, or setting changes".to_string()
+    }
+
+    /// Format generation instructions for ideas
+    fn format_ideas_instructions(
+        params: &GenerationParams,
+        instructions: Option<&str>,
+        focus_areas: &str,
+    ) -> String {
+        let mut inst = format!(
+            "Generate {} different continuation ideas ({}-{} words each). Each should suggest a distinct branch the story could take.\nFocus on: {}.",
+            params.num_candidates,
+            params.min_words,
+            params.max_words,
+            focus_areas
+        );
+
+        if let Some(tone) = &params.tone {
+            inst.push_str(&format!("\nTone: {}", tone));
+        }
+
+        if params.avoid_hard_end {
+            inst.push_str("\nAvoid definitive endings; leave room for further branching.");
+        }
+
+        if let Some(user_inst) = instructions {
+            inst.push_str(&format!("\n\nAdditional instructions: {}", user_inst));
+        }
+
+        inst
+    }
+
+    // ==================== End Prompt Section Formatters ====================
+
+    /// Build prompt for text generation (template-based)
     fn build_text_prompt(
         &self,
         context: &StoryContext,
         nodes: &[PathNode],
         params: &GenerationParams,
+        instructions: Option<&str>,
     ) -> String {
-        let mut prompt = String::new();
+        let title = context.title.as_deref().unwrap_or("Untitled");
+        let language = &context.language;
 
-        prompt.push_str(&format!(
-            "Story: {}\n",
-            context.title.as_deref().unwrap_or("Untitled")
-        ));
-        prompt.push_str(&format!("Language: {}\n", context.language));
-
-        if !context.tags.is_empty() {
-            prompt.push_str(&format!("Genre/Tags: {}\n", context.tags.join(", ")));
-        }
-        prompt.push_str("\n");
-
-        // Optimize context: use summaries for earlier nodes, full content for recent ones
-        if nodes.len() > 5 {
-            let split_at = nodes.len() - 3;
-            let (earlier, recent) = nodes.split_at(split_at);
-
-            if !earlier.is_empty() {
-                prompt.push_str("Story so far:\n");
-                for (i, node) in earlier.iter().enumerate() {
-                    if let Some(summary) = &node.summary {
-                        if !summary.is_empty() {
-                            prompt.push_str(&format!("{}. {}\n", i + 1, summary));
-                        }
-                    } else if !node.content.is_empty() {
-                        // Fallback: use first 100 chars
-                        let preview: String = node.content.chars().take(100).collect();
-                        prompt.push_str(&format!("{}. {}...\n", i + 1, preview));
-                    }
-                    // Skip nodes with both empty summary and content (chapter nodes)
-                }
-                prompt.push_str("\n");
-            }
-
-            prompt.push_str("Recent events:\n");
-            for (i, node) in recent.iter().enumerate() {
-                if !node.content.is_empty() {
-                    prompt.push_str(&format!("{}. {}\n", split_at + i + 1, node.content));
-                } else if let Some(summary) = &node.summary {
-                    if !summary.is_empty() {
-                        prompt.push_str(&format!("{}. {}\n", split_at + i + 1, summary));
-                    }
-                }
-            }
+        let tags = if !context.tags.is_empty() {
+            format!("Genre/Tags: {}\n", context.tags.join(", "))
         } else {
-            prompt.push_str("Story so far:\n");
-            for (i, node) in nodes.iter().enumerate() {
-                if !node.content.is_empty() {
-                    prompt.push_str(&format!("{}. {}\n", i + 1, node.content));
-                } else if let Some(summary) = &node.summary {
-                    if !summary.is_empty() {
-                        prompt.push_str(&format!("{}. {}\n", i + 1, summary));
-                    }
-                }
-            }
-        }
+            String::new()
+        };
 
-        prompt.push_str(&format!(
-            "\n\nGenerate {} different continuations ({}-{} words each). Each should offer a distinct narrative direction that could become a separate story branch.",
-            params.num_candidates,
-            params.min_words,
-            params.max_words
-        ));
+        let background = Self::format_background_section(&context.background);
+        let characters = Self::format_characters_section(&context.active_characters);
+        let story_content = Self::format_story_content_detailed(nodes);
 
-        if let Some(tone) = &params.tone {
-            prompt.push_str(&format!(" Tone: {}.", tone));
-        }
+        let has_context =
+            context.background.is_some() || context.active_characters.is_some();
+        let generation_instructions =
+            Self::format_prose_instructions(params, instructions, has_context);
 
-        if params.avoid_hard_end {
-            prompt.push_str(" Keep endings open for further branching.");
-        }
-
-        prompt
+        format!(
+            r#"Story: {title}
+Language: {language}
+{tags}{background}{characters}
+{story_content}
+{generation_instructions}"#,
+            title = title,
+            language = language,
+            tags = tags,
+            background = background,
+            characters = characters,
+            story_content = story_content,
+            generation_instructions = generation_instructions,
+        )
     }
 
     /// Build prompt for image generation
@@ -291,14 +576,18 @@ impl AIService {
     ) -> String {
         let mut prompt = String::new();
 
-        if let Some(style) = &params.style {
-            prompt.push_str(&format!("{} style illustration: ", style));
-        } else {
-            prompt.push_str("Storybook illustration: ");
+        // Style description
+        let style = params.style.unwrap_or(ImageStyle::Illustration);
+        prompt.push_str(&format!("{} style illustration: ", style.as_str()));
+
+        // Content (prefer content over summary)
+        if let Some(content) = &node.content {
+            prompt.push_str(content);
+        } else if let Some(summary) = &node.summary {
+            prompt.push_str(summary);
         }
 
-        prompt.push_str(&node.content);
-
+        // Tags
         if !node.tags.is_empty() {
             prompt.push_str(&format!(", featuring: {}", node.tags.join(", ")));
         }
@@ -306,80 +595,44 @@ impl AIService {
         prompt
     }
 
-    /// Build prompt for ideas mode
+    /// Build prompt for ideas generation (template-based)
     fn build_ideas_prompt(
         &self,
         context: &StoryContext,
         nodes: &[PathNode],
         params: &GenerationParams,
+        instructions: Option<&str>,
     ) -> String {
-        let mut prompt = String::new();
+        let title = context.title.as_deref().unwrap_or("Untitled");
+        let language = &context.language;
 
-        prompt.push_str(&format!(
-            "Story: {}\n",
-            context.title.as_deref().unwrap_or("Untitled")
-        ));
-        prompt.push_str(&format!("Language: {}\n", context.language));
-
-        if !context.tags.is_empty() {
-            prompt.push_str(&format!("Genre: {}\n", context.tags.join(", ")));
-        }
-        prompt.push_str("\n");
-
-        // For ideas, use even more aggressive summarization
-        if nodes.len() > 3 {
-            let split_at = nodes.len() - 2;
-            let (earlier, recent) = nodes.split_at(split_at);
-
-            if !earlier.is_empty() {
-                prompt.push_str("Story context:\n");
-                for node in earlier {
-                    if let Some(summary) = &node.summary {
-                        if !summary.is_empty() {
-                            prompt.push_str(&format!("- {}\n", summary));
-                        }
-                    } else if !node.content.is_empty() {
-                        let preview: String = node.content.chars().take(80).collect();
-                        prompt.push_str(&format!("- {}...\n", preview));
-                    }
-                    // Skip empty chapter nodes
-                }
-                prompt.push_str("\n");
-            }
-
-            prompt.push_str("Current situation:\n");
-            for node in recent {
-                if let Some(summary) = &node.summary {
-                    if !summary.is_empty() {
-                        prompt.push_str(&format!("- {}\n", summary));
-                    }
-                } else if !node.content.is_empty() {
-                    let preview: String = node.content.chars().take(150).collect();
-                    prompt.push_str(&format!("- {}\n", preview));
-                }
-                // Skip empty chapter nodes
-            }
+        let tags = if !context.tags.is_empty() {
+            format!("Genre: {}\n", context.tags.join(", "))
         } else {
-            prompt.push_str("Story so far:\n");
-            for node in nodes {
-                if let Some(summary) = &node.summary {
-                    if !summary.is_empty() {
-                        prompt.push_str(&format!("- {}\n", summary));
-                    }
-                } else if !node.content.is_empty() {
-                    prompt.push_str(&format!("- {}\n", node.content));
-                }
-                // Skip empty chapter nodes
-            }
-        }
+            String::new()
+        };
 
-        prompt.push_str(&format!(
-            "\n\nGenerate {} different continuation ideas. Each should suggest a distinct branch the story could take.\n\
-            Focus on: character decisions, plot directions, or setting changes.",
-            params.num_candidates
-        ));
+        let background = Self::format_background_compact(&context.background);
+        let characters = Self::format_characters_compact(&context.active_characters);
+        let story_content = Self::format_story_content_summary(nodes);
+        let focus_areas = Self::format_ideas_focus(&context.active_characters);
+        let generation_instructions =
+            Self::format_ideas_instructions(params, instructions, &focus_areas);
 
-        prompt
+        format!(
+            r#"Story: {title}
+Language: {language}
+{tags}{background}{characters}
+{story_content}
+{generation_instructions}"#,
+            title = title,
+            language = language,
+            tags = tags,
+            background = background,
+            characters = characters,
+            story_content = story_content,
+            generation_instructions = generation_instructions,
+        )
     }
 
     /// Generate text edit/transformation via OpenRouter
@@ -617,10 +870,10 @@ impl AIService {
     }
 
     /// Generate summaries for multiple nodes
-    #[instrument(skip(self, _story_context, nodes, account_tier))]
+    #[instrument(skip(self, story_context, nodes, account_tier))]
     pub async fn generate_summaries(
         &self,
-        _story_context: Option<&StoryContextSimple>,
+        story_context: Option<&StoryContextSimple>,
         nodes: &[NodeToSummarize],
         account_tier: &AccountTier,
     ) -> Result<Vec<NodeSummary>> {
@@ -629,8 +882,32 @@ impl AIService {
             "You are a writing assistant that generates concise one-line summaries. \
             Each summary should be max 50 characters and capture the key action or event.";
 
-        // Build user prompt
+        // Build user prompt with story context
         let mut user_prompt = String::new();
+
+        // Add story context if provided
+        if let Some(context) = story_context {
+            if let Some(title) = &context.title {
+                if !title.is_empty() {
+                    user_prompt.push_str(&format!("Story: {}\n", title));
+                }
+            }
+
+            if let Some(language) = &context.language {
+                if !language.is_empty() {
+                    user_prompt.push_str(&format!("Language: {}\n", language));
+                }
+            }
+
+            if !context.tags.is_empty() {
+                user_prompt.push_str(&format!("Genre: {}\n", context.tags.join(", ")));
+            }
+
+            if user_prompt.len() > 0 {
+                user_prompt.push_str("\n");
+            }
+        }
+
         user_prompt.push_str("Generate a one-line summary (max 50 characters) for each text:\n\n");
 
         for (i, node) in nodes.iter().enumerate() {
@@ -914,28 +1191,7 @@ Return your response as a JSON object with this exact structure:
 
 Each continuation should present a different plot direction, character choice, or narrative possibility."#.to_string();
 
-        let mut user_prompt = self.build_text_prompt(context, nodes, params);
-
-        user_prompt.push_str(&format!(
-            "\n\nGenerate {} distinctly different story continuations ({}-{} words each).",
-            params.num_candidates,
-            params.min_words,
-            params.max_words
-        ));
-
-        if let Some(tone) = &params.tone {
-            user_prompt.push_str(&format!(" Tone: {}.", tone));
-        }
-
-        if params.avoid_hard_end {
-            user_prompt.push_str(" Keep endings open for further branching.");
-        }
-
-        if let Some(instr) = instructions {
-            user_prompt.push_str("\n\nAdditional guidance:\n");
-            user_prompt.push_str(instr);
-        }
-
+        let mut user_prompt = self.build_text_prompt(context, nodes, params, instructions);
         user_prompt.push_str("\n\nReturn the response in JSON format as specified.");
 
         // Choose model
@@ -1003,39 +1259,31 @@ Each continuation should present a different plot direction, character choice, o
         instructions: Option<&str>,
         account_tier: &AccountTier,
     ) -> Result<Vec<TextCandidate>> {
-        // Build JSON-requesting prompt
-        let system_prompt = r#"You are a creative writing assistant for Talevonia, a branching narrative app.
+        // Build JSON-requesting prompt with dynamic word counts
+        let system_prompt = format!(
+            r#"You are a creative writing assistant for Talevonia, a branching narrative app.
 Return your response as a JSON object with this exact structure:
-{
+{{
   "continuations": [
-    {
+    {{
       "title": "4-12 word summary of this branch direction",
-      "content": "20-50 word description of what happens in this branch"
-    }
+      "content": "{}-{} word description of what happens in this branch"
+    }}
   ]
-}
+}}
 
-Each idea should suggest a distinct narrative direction: character decision, plot twist, or setting change."#.to_string();
+Each idea should suggest a distinct narrative direction: character decision, plot twist, or setting change."#,
+            params.min_words, params.max_words
+        );
 
-        let mut user_prompt = self.build_ideas_prompt(context, nodes, params);
-
-        user_prompt.push_str(&format!(
-            "\n\nGenerate {} different continuation ideas. Each should represent a distinct path the story could take.",
-            params.num_candidates
-        ));
-
-        if let Some(instr) = instructions {
-            user_prompt.push_str("\n\nAdditional guidance:\n");
-            user_prompt.push_str(instr);
-        }
-
+        let mut user_prompt = self.build_ideas_prompt(context, nodes, params, instructions);
         user_prompt.push_str("\n\nReturn the response in JSON format as specified.");
 
         // Choose model
         let input_chars = user_prompt.len() + system_prompt.len();
         let model = self.select_model(TaskKind::Ideas, account_tier, input_chars)?;
 
-        // Prepare request with JSON format
+        // Prepare request with JSON format - calculate max_tokens based on params
         let request = OpenAIRequest {
             model: model.model.clone(),
             messages: vec![
@@ -1048,7 +1296,7 @@ Each idea should suggest a distinct narrative direction: character decision, plo
                     content: user_prompt,
                 },
             ],
-            max_tokens: (100 * params.num_candidates as u32) as u32,  // ~50 words per idea
+            max_tokens: (params.max_words * params.num_candidates as u32 * 2) as u32,  // 2x for titles + JSON overhead
             temperature: 0.8,  // Higher creativity for ideas
             n: 1,  // Single response with JSON array
             response_format: Some(ResponseFormat {

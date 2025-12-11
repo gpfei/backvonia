@@ -11,6 +11,7 @@ pub struct Config {
     pub auth: AuthConfig,
     pub application: ApplicationConfig,
     pub quota: QuotaConfig,
+    pub storage: StorageConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -137,6 +138,27 @@ pub struct QuotaConfig {
     pub pro_image_daily_limit: i32,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct StorageConfig {
+    /// S3-compatible endpoint URL (e.g., https://account-id.r2.cloudflarestorage.com)
+    pub endpoint_url: String,
+    /// AWS access key ID (or R2 access key)
+    pub access_key_id: String,
+    /// AWS secret access key (or R2 secret key)
+    pub secret_access_key: String,
+    /// Bucket name for storing generated images
+    pub bucket_name: String,
+    /// AWS region (use 'auto' for Cloudflare R2)
+    #[serde(default = "default_storage_region")]
+    pub region: String,
+    /// Base URL for public access (CDN domain if configured)
+    #[serde(default)]
+    pub public_base_url: Option<String>,
+    /// Duration in seconds for signed URL expiration
+    #[serde(default = "default_signed_url_expiration")]
+    pub signed_url_expiration_seconds: u64,
+}
+
 // Default values
 fn default_host() -> String {
     "0.0.0.0".to_string()
@@ -176,6 +198,14 @@ fn default_pro_text_limit() -> i32 {
 
 fn default_pro_image_limit() -> i32 {
     500 // 50 image generations
+}
+
+fn default_storage_region() -> String {
+    "auto".to_string() // Cloudflare R2 uses 'auto' region
+}
+
+fn default_signed_url_expiration() -> u64 {
+    3600 // 1 hour in seconds
 }
 
 fn default_openrouter_base() -> String {
@@ -342,6 +372,25 @@ impl Config {
                 env::var("PRO_IMAGE_DAILY_LIMIT")
                     .ok()
                     .and_then(|v| v.parse::<i32>().ok()),
+            )?
+            // Storage
+            .set_override_option("storage.endpoint_url", env::var("STORAGE_ENDPOINT_URL").ok())?
+            .set_override_option("storage.access_key_id", env::var("STORAGE_ACCESS_KEY_ID").ok())?
+            .set_override_option(
+                "storage.secret_access_key",
+                env::var("STORAGE_SECRET_ACCESS_KEY").ok(),
+            )?
+            .set_override_option("storage.bucket_name", env::var("STORAGE_BUCKET_NAME").ok())?
+            .set_override_option("storage.region", env::var("STORAGE_REGION").ok())?
+            .set_override_option(
+                "storage.public_base_url",
+                env::var("STORAGE_PUBLIC_BASE_URL").ok(),
+            )?
+            .set_override_option(
+                "storage.signed_url_expiration_seconds",
+                env::var("STORAGE_SIGNED_URL_EXPIRATION_SECONDS")
+                    .ok()
+                    .and_then(|v| v.parse::<u64>().ok()),
             )?
             .build()?;
 

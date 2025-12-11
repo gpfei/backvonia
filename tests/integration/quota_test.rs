@@ -161,3 +161,158 @@ async fn test_quota_pro_tier_limits() {
 
     println!("✅ Pro tier quota limits test passed");
 }
+
+#[tokio::test]
+#[ignore] // Run only when test database is available
+async fn test_refund_quota_after_failure() {
+    let db = setup_test_db().await;
+    let config = create_test_quota_config();
+    let service = QuotaService::new(db, &config);
+
+    let user_id = Uuid::new_v4();
+    let tier = AccountTier::Free;
+
+    // Initial quota check
+    let initial_status = service.check_quota(user_id, &tier).await.unwrap();
+    let initial_credits = initial_status.total_credits_remaining;
+    assert_eq!(initial_credits, 15); // Free tier starts with 15 credits
+
+    // Deduct credits for image generation (10 credits)
+    let after_deduct = service
+        .check_and_increment_quota_weighted(user_id, &tier, AIOperation::ImageGenerate)
+        .await
+        .unwrap();
+    assert_eq!(after_deduct.total_credits_remaining, 5); // 15 - 10 = 5
+
+    // Simulate failure and refund
+    service
+        .refund_quota_weighted(user_id, &tier, AIOperation::ImageGenerate)
+        .await
+        .unwrap();
+
+    // Verify refund
+    let after_refund = service.check_quota(user_id, &tier).await.unwrap();
+    assert_eq!(after_refund.total_credits_remaining, 15); // Back to 15
+
+    println!("✅ Refund quota after failure test passed");
+}
+
+#[tokio::test]
+#[ignore] // Run only when test database is available
+async fn test_refund_does_not_create_negative_usage() {
+    let db = setup_test_db().await;
+    let config = create_test_quota_config();
+    let service = QuotaService::new(db, &config);
+
+    let user_id = Uuid::new_v4();
+    let tier = AccountTier::Free;
+
+    // Try to refund without any prior deduction
+    // This should succeed (defensive programming - just adds credits)
+    let result = service
+        .refund_quota_weighted(user_id, &tier, AIOperation::ImageGenerate)
+        .await;
+
+    assert!(result.is_ok(), "Refund should not fail even without prior deduction");
+
+    // Check that credits were added
+    let status = service.check_quota(user_id, &tier).await.unwrap();
+    assert_eq!(status.total_credits_remaining, 25); // 15 initial + 10 refunded
+
+    println!("✅ Refund without negative usage test passed");
+}
+
+#[tokio::test]
+#[ignore] // Run only when test database is available
+async fn test_refund_multiple_operations() {
+    let db = setup_test_db().await;
+    let config = create_test_quota_config();
+    let service = QuotaService::new(db, &config);
+
+    let user_id = Uuid::new_v4();
+    let tier = AccountTier::Free;
+
+    // Deduct for text operation (5 credits)
+    service
+        .check_and_increment_quota_weighted(user_id, &tier, AIOperation::ContinueProse)
+        .await
+        .unwrap();
+
+    // Deduct for image operation (10 credits)
+    service
+        .check_and_increment_quota_weighted(user_id, &tier, AIOperation::ImageGenerate)
+        .await
+        .unwrap();
+
+    // Should have 0 credits left (15 - 5 - 10 = 0)
+    let status = service.check_quota(user_id, &tier).await.unwrap();
+    assert_eq!(status.total_credits_remaining, 0);
+
+    // Refund text operation
+    service
+        .refund_quota_weighted(user_id, &tier, AIOperation::ContinueProse)
+        .await
+        .unwrap();
+
+    // Should have 5 credits back
+    let status = service.check_quota(user_id, &tier).await.unwrap();
+    assert_eq!(status.total_credits_remaining, 5);
+
+    // Refund image operation
+    service
+        .refund_quota_weighted(user_id, &tier, AIOperation::ImageGenerate)
+        .await
+        .unwrap();
+
+    // Should have all 15 credits back
+    let status = service.check_quota(user_id, &tier).await.unwrap();
+    assert_eq!(status.total_credits_remaining, 15);
+
+    println!("✅ Refund multiple operations test passed");
+}
+
+#[tokio::test]
+#[ignore] // Run only when test database is available
+async fn test_refund_with_extra_credits() {
+    let db = setup_test_db().await;
+    let config = create_test_quota_config();
+    let service = QuotaService::new(db, &config);
+
+    let user_id = Uuid::new_v4();
+    let tier = AccountTier::Free;
+
+    // Add extra credits (like from a purchase)
+    service.add_extra_credits(user_id, &tier, 50).await.unwrap();
+
+    // Should have 65 total credits (15 subscription + 50 extra)
+    let status = service.check_quota(user_id, &tier).await.unwrap();
+    assert_eq!(status.total_credits_remaining, 65);
+    assert_eq!(status.subscription_credits, 15);
+    assert_eq!(status.extra_credits_remaining, 50);
+
+    // Deduct for image (10 credits from subscription)
+    service
+        .check_and_increment_quota_weighted(user_id, &tier, AIOperation::ImageGenerate)
+        .await
+        .unwrap();
+
+    // Should have 55 total (5 subscription + 50 extra)
+    let status = service.check_quota(user_id, &tier).await.unwrap();
+    assert_eq!(status.total_credits_remaining, 55);
+    assert_eq!(status.subscription_credits, 5);
+    assert_eq!(status.extra_credits_remaining, 50);
+
+    // Refund the image operation
+    service
+        .refund_quota_weighted(user_id, &tier, AIOperation::ImageGenerate)
+        .await
+        .unwrap();
+
+    // Refund goes to extra credits (65 total: 5 subscription + 60 extra)
+    let status = service.check_quota(user_id, &tier).await.unwrap();
+    assert_eq!(status.total_credits_remaining, 65);
+    assert_eq!(status.subscription_credits, 5);
+    assert_eq!(status.extra_credits_remaining, 60);
+
+    println!("✅ Refund with extra credits test passed");
+}

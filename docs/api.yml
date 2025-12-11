@@ -396,6 +396,32 @@ paths:
       tags: [AI]
       summary: Generate AI image for a story node
       operationId: aiImageGenerate
+      description: |
+        Generates an AI illustration for a story node based on node content, story context, and style preferences.
+
+        **Cost:** 10 credits per generation
+
+        **Supported Styles:**
+        - `storybook` - Book illustration style (recommended for Fantasy)
+        - `anime` - Anime/manga art style
+        - `digital-art` - Modern digital art (recommended for Sci-Fi)
+        - `realistic` - Photorealistic style
+        - `watercolor` - Watercolor painting (recommended for Romance)
+        - `ink-drawing` - Ink drawing style (recommended for Horror/Thriller)
+        - `classical-illustration` - Classical art illustration (recommended for Historical)
+        - `illustration` - General illustration style (default)
+
+        **Image Specifications:**
+        - Aspect ratio: 3:4 (portrait orientation for story illustrations)
+        - Resolution: medium (768x1024 approx) for free tier, high (1536x2048 approx) for Pro tier
+        - Format: JPEG
+        - Delivery: Temporary URL valid for 1 hour (client must download and store locally)
+
+        **Generation Time:** 10-30 seconds typical
+
+        **Validation:**
+        - At least one of `node.summary` or `node.content` must be non-empty
+        - Maximum node content length: 10,000 characters
       security:
         - BearerAuth: []
       parameters:
@@ -408,19 +434,73 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/AIImageGenerateRequest'
+            examples:
+              fantasyScene:
+                summary: Fantasy story scene
+                value:
+                  storyContext:
+                    title: "The Echo Keeper"
+                    language: "en"
+                    genre: "Fantasy"
+                    tone: "Dark"
+                    setting: "A world where memories are stored in crystal towers"
+                  node:
+                    summary: "The hero discovers a mysterious artifact in the ancient ruins"
+                    content: "Alice stepped into the crumbling hall, her footsteps echoing against marble walls covered in glowing runes. In the center, atop a pedestal of black stone, rested a crystal orb pulsing with ethereal light."
+                    tags: ["discovery", "artifact", "ruins"]
+                  imageParams:
+                    style: "storybook"
+                    aspectRatio: "3:4"
+                    resolution: "medium"
+              sciFiScene:
+                summary: Sci-Fi story scene
+                value:
+                  storyContext:
+                    title: "Neon Shadows"
+                    language: "en"
+                    genre: "Sci-Fi"
+                    tone: "Cyberpunk"
+                    setting: "Neo-Tokyo 2089"
+                  node:
+                    summary: "The hacker infiltrates the megacorp headquarters"
+                    content: "Rain-slicked neon reflected off chrome towers as Kai's fingers danced across the holographic interface."
+                    tags: ["hacking", "megacorp", "infiltration"]
+                  imageParams:
+                    style: "digital-art"
+                    aspectRatio: "3:4"
+                    resolution: "high"
       responses:
         '200':
-          description: AI generated image metadata
+          description: AI generated image metadata with temporary download URL
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AIImageGenerateResponse'
+              example:
+                image:
+                  url: "https://cdn.talevonia.app/temp/abc123def456.jpg?expires=1704067200"
+                  mimeType: "image/jpeg"
+                  width: 768
+                  height: 1024
         '400':
-          description: Invalid request
+          description: Invalid request (missing content, invalid style, etc.)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missingContent:
+                  summary: Node has no content
+                  value:
+                    error:
+                      code: INVALID_REQUEST
+                      message: "Node must have summary or content"
+                invalidStyle:
+                  summary: Invalid style parameter
+                  value:
+                    error:
+                      code: INVALID_REQUEST
+                      message: "Invalid image style. Supported: storybook, anime, digital-art, realistic, watercolor, ink-drawing, classical-illustration, illustration"
         '401':
           description: Unauthorized - invalid or missing access token
           content:
@@ -428,13 +508,23 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '429':
-          description: Rate limited or quota exceeded
+          description: Rate limited or insufficient credits
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                quotaExceeded:
+                  summary: Insufficient credits
+                  value:
+                    error:
+                      code: QUOTA_EXCEEDED
+                      message: "Insufficient credits. Image generation requires 10 credits."
+                      details:
+                        required: 10
+                        available: 3
         '500':
-          description: Server error
+          description: Server error or AI service failure
           content:
             application/json:
               schema:
@@ -959,6 +1049,41 @@ components:
             language:
               type: string
               example: en
+            background:
+              type: object
+              nullable: true
+              description: Optional story background context (genre, tone, setting)
+              properties:
+                genre:
+                  type: string
+                  nullable: true
+                  description: Story genre (e.g., "Fantasy", "Sci-Fi", "Romance")
+                tone:
+                  type: string
+                  nullable: true
+                  description: Story tone (e.g., "Dark", "Hopeful", "Comedic")
+                setting:
+                  type: string
+                  nullable: true
+                  description: Story world/setting description
+            activeCharacters:
+              type: array
+              nullable: true
+              description: List of characters active in this story (up to 8)
+              items:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    description: Character name (required)
+                  role:
+                    type: string
+                    nullable: true
+                    description: Character role (e.g., "Protagonist", "Antagonist")
+                  description:
+                    type: string
+                    nullable: true
+                    description: Brief character description (recommended 200 chars)
         pathNodes:
           type: array
           items:
@@ -1006,6 +1131,41 @@ components:
             language:
               type: string
               example: en
+            background:
+              type: object
+              nullable: true
+              description: Optional story background context (genre, tone, setting)
+              properties:
+                genre:
+                  type: string
+                  nullable: true
+                  description: Story genre (e.g., "Fantasy", "Sci-Fi", "Romance")
+                tone:
+                  type: string
+                  nullable: true
+                  description: Story tone (e.g., "Dark", "Hopeful", "Comedic")
+                setting:
+                  type: string
+                  nullable: true
+                  description: Story world/setting description
+            activeCharacters:
+              type: array
+              nullable: true
+              description: List of characters active in this story (up to 8)
+              items:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    description: Character name (required)
+                  role:
+                    type: string
+                    nullable: true
+                    description: Character role (e.g., "Protagonist", "Antagonist")
+                  description:
+                    type: string
+                    nullable: true
+                    description: Brief character description (recommended 200 chars)
         pathNodes:
           type: array
           items:
@@ -1200,31 +1360,84 @@ components:
           properties:
             title:
               type: string
+              description: Story title
+              example: "The Echo Keeper"
             language:
               type: string
+              description: BCP-47 language code (auto-detected from content by client)
+              example: "en"
+            genre:
+              type: string
+              nullable: true
+              description: Optional story genre for visual style context
+              example: "Fantasy"
+            tone:
+              type: string
+              nullable: true
+              description: Optional story tone for mood context
+              example: "Dark"
+            setting:
+              type: string
+              nullable: true
+              description: Optional story setting for environment context (max 500 chars)
+              maxLength: 500
+              example: "A world where memories are stored in crystal towers"
+          required: [title, language]
         node:
           type: object
           properties:
             summary:
               type: string
+              description: One-line node summary (max 200 chars, optional if content present)
+              maxLength: 200
+              example: "The hero discovers a mysterious artifact in the ancient ruins"
             content:
               type: string
+              description: Full node content (max 10,000 chars, optional if summary present)
+              maxLength: 10000
+              example: "Alice stepped into the crumbling hall..."
             tags:
               type: array
+              description: Node tags for additional context (max 10 tags)
+              maxItems: 10
               items:
                 type: string
+                maxLength: 50
+              example: ["discovery", "artifact", "ruins"]
+          description: At least one of summary or content must be non-empty
         imageParams:
           type: object
+          nullable: true
           properties:
             style:
               type: string
-              description: e.g. "storybook", "anime", "realistic"
-            aspect_ratio:
+              nullable: true
+              description: Image style preference
+              enum:
+                - storybook
+                - anime
+                - digital-art
+                - realistic
+                - watercolor
+                - ink-drawing
+                - classical-illustration
+                - illustration
+              example: "storybook"
+            aspectRatio:
               type: string
-              description: e.g. "3:4", "16:9"
+              nullable: true
+              description: Image aspect ratio (currently only 3:4 supported)
+              enum: ["3:4"]
+              default: "3:4"
+              example: "3:4"
             resolution:
               type: string
-              description: e.g. "low", "medium", "high"
+              nullable: true
+              description: Image resolution (medium for free, high for Pro tier)
+              enum: [medium, high]
+              default: "medium"
+              example: "medium"
+          description: Optional image generation parameters
       required: [storyContext, node]
 
     GeneratedImage:
@@ -1233,16 +1446,25 @@ components:
         url:
           type: string
           format: uri
-        mime_type:
+          description: Temporary download URL (valid for 1 hour)
+          example: "https://cdn.talevonia.app/temp/abc123def456.jpg?expires=1704067200"
+        mimeType:
           type: string
-          example: image/png
+          description: Image MIME type
+          example: "image/jpeg"
         width:
           type: integer
+          description: Image width in pixels
+          example: 768
         height:
           type: integer
+          description: Image height in pixels
+          example: 1024
+      required: [url, mimeType, width, height]
 
     AIImageGenerateResponse:
       type: object
       properties:
         image:
           $ref: '#/components/schemas/GeneratedImage'
+      required: [image]

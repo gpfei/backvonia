@@ -23,6 +23,8 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
+    #[sea_orm(has_many = "super::ai_image_generation::Entity")]
+    AiImageGeneration,
     #[sea_orm(has_many = "super::credits_events::Entity")]
     CreditsEvents,
     #[sea_orm(has_many = "super::iap_receipt_cache::Entity")]
@@ -35,6 +37,12 @@ pub enum Relation {
     UserAuthMethods,
     #[sea_orm(has_one = "super::user_credit_balance::Entity")]
     UserCreditBalance,
+}
+
+impl Related<super::ai_image_generation::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::AiImageGeneration.def()
+    }
 }
 
 impl Related<super::credits_events::Entity> for Entity {

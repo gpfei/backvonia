@@ -2,6 +2,7 @@
 
 pub mod prelude;
 
+pub mod ai_image_generation;
 pub mod credits_events;
 pub mod iap_receipt_cache;
 pub mod quota_usage;

@@ -234,6 +234,64 @@ impl QuotaService {
         Ok(())
     }
 
+    /// Refund credits after a failed operation
+    /// Reverses the deduction made by check_and_increment_quota_weighted
+    #[instrument(skip(self))]
+    pub async fn refund_quota_weighted(
+        &self,
+        user_id: Uuid,
+        tier: &AccountTier,
+        operation: AIOperation,
+    ) -> Result<()> {
+        let cost = operation.cost() as i32;
+        let today = time::OffsetDateTime::now_utc().date();
+
+        let txn = self.db.begin().await?;
+
+        // 1. Lock credit balance
+        let balance = self
+            .find_and_lock_credit_balance(user_id, tier, &txn)
+            .await?;
+
+        // 2. Refund credits (add them back)
+        // Logic: Refund to extra credits first (they were deducted last in FIFO)
+        // This is a simplification - we add to extra credits for safety
+        let mut balance_active: entity::user_credit_balance::ActiveModel = balance.into();
+
+        let current_extra = *balance_active.extra_credits_remaining.as_ref();
+        balance_active.extra_credits_remaining = Set(current_extra + cost);
+        balance_active.last_updated = Set(time::OffsetDateTime::now_utc());
+        balance_active.update(&txn).await?;
+
+        // 3. Decrement daily usage log (for analytics accuracy)
+        let usage = self.find_and_lock_usage(user_id, today, &txn).await?;
+        let mut usage_active: entity::quota_usage::ActiveModel = usage.into();
+
+        let is_image_op = matches!(operation, AIOperation::ImageGenerate);
+        if is_image_op {
+            let current = *usage_active.image_count.as_ref();
+            // Prevent negative counts
+            usage_active.image_count = Set(std::cmp::max(0, current - cost));
+        } else {
+            let current = *usage_active.text_count.as_ref();
+            usage_active.text_count = Set(std::cmp::max(0, current - cost));
+        }
+        usage_active.updated_at = Set(time::OffsetDateTime::now_utc());
+        usage_active.update(&txn).await?;
+
+        txn.commit().await?;
+
+        info!(
+            "Refunded {} credits for {} operation to user: {} (new extra credits: {})",
+            cost,
+            if is_image_op { "image" } else { "text" },
+            user_id,
+            current_extra + cost
+        );
+
+        Ok(())
+    }
+
     /// Helper: Get or create credit balance for a user
     /// IMPORTANT: When creating, syncs extra credits from credits_events
     async fn get_or_create_credit_balance(

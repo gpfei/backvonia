@@ -1,3 +1,13 @@
+server:
+  host: 0.0.0.0
+  port: 8080
+
+database:
+  url: ${DATABASE_URL}
+
+redis:
+  url: ${REDIS_URL}
+
 ai:
   openrouter:
     api_key: ${OPENROUTER_API_KEY}
@@ -46,3 +56,32 @@ ai:
         downgrade_over_chars: 2500
   # openai_api_key: ${OPENAI_API_KEY} # only needed for images
 
+iap:
+  apple_shared_secret: ${APPLE_SHARED_SECRET}
+  apple_environment: sandbox
+
+auth:
+  jwt_secret: ${JWT_SECRET}
+  access_token_expiration_minutes: 15
+  refresh_token_expiration_days: 7
+  apple_client_id: ${APPLE_CLIENT_ID}
+  apple_team_id: ${APPLE_TEAM_ID}
+  welcome_bonus_amount: 5
+
+application:
+  base_url: ${BASE_URL:-http://localhost:8080}
+
+quota:
+  free_text_daily_limit: 15
+  free_image_daily_limit: 10
+  pro_text_daily_limit: 5000
+  pro_image_daily_limit: 500
+
+storage:
+  endpoint_url: ${STORAGE_ENDPOINT_URL}
+  access_key_id: ${STORAGE_ACCESS_KEY_ID}
+  secret_access_key: ${STORAGE_SECRET_ACCESS_KEY}
+  bucket_name: ${STORAGE_BUCKET_NAME}
+  region: auto
+  # public_base_url: ${STORAGE_PUBLIC_BASE_URL}  # Optional CDN URL
+  signed_url_expiration_seconds: 3600

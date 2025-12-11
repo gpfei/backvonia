@@ -14,6 +14,9 @@ use crate::{
         common::AIOperation,
     },
 };
+use entity::ai_image_generation;
+use sea_orm::{ActiveModelTrait, Set};
+use uuid::Uuid;
 
 /// POST /api/v1/ai/text/continue
 #[instrument(skip(state, identity, request))]
@@ -75,6 +78,7 @@ pub async fn image_generate(
         .map_err(|e| ApiError::BadRequest(format!("Validation error: {}", e)))?;
 
     let tier = &identity.account_tier;
+    let start_time = std::time::Instant::now();
 
     // Atomically check and increment quota with weighted cost
     state
@@ -82,13 +86,141 @@ pub async fn image_generate(
         .check_and_increment_quota_weighted(identity.user_id, tier, AIOperation::ImageGenerate)
         .await?;
 
-    // Generate image
-    let image = state
-        .ai_service
-        .generate_image(&request.story_context, &request.node, &request.image_params)
-        .await?;
+    // Attempt image generation with error tracking
+    let generation_result = async {
+        // Generate image (returns image bytes + metadata)
+        let (image_bytes, mut image_metadata) = state
+            .ai_service
+            .generate_image(&request.story_context, &request.node, &request.image_params, tier)
+            .await?;
 
-    Ok(Json(AIImageGenerateResponse { image }))
+        // Upload image to storage
+        let (permanent_url, file_size) = state
+            .storage_service
+            .upload_image(image_bytes, &image_metadata.mime_type, identity.user_id)
+            .await?;
+
+        // Generate temporary signed URL
+        let key = state
+            .storage_service
+            .extract_key_from_url(&permanent_url)
+            .ok_or_else(|| ApiError::Internal(anyhow::anyhow!("Failed to extract storage key")))?;
+
+        let temp_url = state.storage_service.generate_signed_url(&key).await?;
+        let temp_url_expires_at = time::OffsetDateTime::now_utc()
+            + time::Duration::seconds(state.config.storage.signed_url_expiration_seconds as i64);
+
+        image_metadata.url = temp_url.clone();
+
+        Ok::<_, ApiError>((
+            permanent_url,
+            temp_url,
+            temp_url_expires_at,
+            file_size,
+            image_metadata,
+        ))
+    }
+    .await;
+
+    let generation_time_ms = start_time.elapsed().as_millis() as i32;
+
+    // Handle result and save record
+    match generation_result {
+        Ok((permanent_url, temp_url, temp_url_expires_at, file_size, image_metadata)) => {
+            // Save successful generation record
+            let generation_record = ai_image_generation::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                user_id: Set(identity.user_id),
+                story_title: Set(request.story_context.title.clone()),
+                node_summary: Set(request.node.summary.clone()),
+                node_content: Set(request.node.content.clone()),
+                style: Set(request
+                    .image_params
+                    .style
+                    .map(|s| s.as_str().to_string())
+                    .unwrap_or_else(|| "illustration".to_string())),
+                resolution: Set(request.image_params.resolution.clone()),
+                image_url: Set(permanent_url),
+                temp_url: Set(Some(temp_url)),
+                temp_url_expires_at: Set(Some(temp_url_expires_at)),
+                width: Set(image_metadata.width as i32),
+                height: Set(image_metadata.height as i32),
+                file_size_bytes: Set(Some(file_size as i32)),
+                credits_used: Set(10),
+                generation_time_ms: Set(Some(generation_time_ms)),
+                ai_provider: Set(Some("openai-dalle3".to_string())),
+                status: Set("success".to_string()),
+                error_message: Set(None),
+                created_at: Set(time::OffsetDateTime::now_utc()),
+            };
+
+            generation_record
+                .insert(&state.db)
+                .await
+                .map_err(|e| ApiError::Database(e))?;
+
+            Ok(Json(AIImageGenerateResponse {
+                image: image_metadata,
+            }))
+        }
+        Err(err) => {
+            // Save failed generation record for analytics
+            let error_msg = err.to_string();
+            tracing::error!("Image generation failed: {}", error_msg);
+
+            let failed_record = ai_image_generation::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                user_id: Set(identity.user_id),
+                story_title: Set(request.story_context.title.clone()),
+                node_summary: Set(request.node.summary.clone()),
+                node_content: Set(request.node.content.clone()),
+                style: Set(request
+                    .image_params
+                    .style
+                    .map(|s| s.as_str().to_string())
+                    .unwrap_or_else(|| "illustration".to_string())),
+                resolution: Set(request.image_params.resolution.clone()),
+                image_url: Set(String::new()),
+                temp_url: Set(None),
+                temp_url_expires_at: Set(None),
+                width: Set(0),
+                height: Set(0),
+                file_size_bytes: Set(None),
+                credits_used: Set(10), // Credits were deducted but will be refunded
+                generation_time_ms: Set(Some(generation_time_ms)),
+                ai_provider: Set(Some("openai-dalle3".to_string())),
+                status: Set("failed".to_string()),
+                error_message: Set(Some(error_msg.clone())),
+                created_at: Set(time::OffsetDateTime::now_utc()),
+            };
+
+            // Save failed record (don't fail if this fails)
+            if let Err(db_err) = failed_record.insert(&state.db).await {
+                tracing::error!("Failed to save error record: {}", db_err);
+            }
+
+            // Refund credits after failed generation
+            if let Err(refund_err) = state
+                .quota_service
+                .refund_quota_weighted(identity.user_id, tier, AIOperation::ImageGenerate)
+                .await
+            {
+                tracing::error!(
+                    user_id = %identity.user_id,
+                    error = %refund_err,
+                    "Failed to refund credits after generation failure - user may have lost credits"
+                );
+                // Don't fail the request - user already saw generation error
+            } else {
+                tracing::info!(
+                    user_id = %identity.user_id,
+                    "Successfully refunded 10 credits after generation failure"
+                );
+            }
+
+            Err(err)
+        }
+    }
 }
 
 /// POST /api/v1/ai/text/edit

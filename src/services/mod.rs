@@ -6,6 +6,7 @@ pub mod iap_service;
 pub mod jwt_service;
 pub mod quota_service;
 pub mod refresh_token_service;
+pub mod storage_service;
 pub mod welcome_bonus_service;
 
 pub use ai_service::AIService;
@@ -15,4 +16,5 @@ pub use iap_service::IAPService;
 pub use jwt_service::JWTService;
 pub use quota_service::QuotaService;
 pub use refresh_token_service::RefreshTokenService;
+pub use storage_service::StorageService;
 pub use welcome_bonus_service::WelcomeBonusService;
