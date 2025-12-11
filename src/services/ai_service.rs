@@ -2,13 +2,21 @@ use crate::{
     config::{AIConfig, ModelTierConfig, TaskRouting},
     error::{ApiError, Result},
     models::ai::{
-        AITextEditMode, Background, Character, EditInput, EditParams, GeneratedImage,
+        AITextEditMode, Background, Character, EditInput, EditParams,
         GenerationParams, ImageParams, ImageStoryContext, ImageStyle, NodeContext, NodeSummary,
         NodeToSummarize, PathNode, StoryContext, StoryContextSimple, TextCandidate,
         TextEditCandidate,
     },
 };
+use base64::Engine;
 use entity::sea_orm_active_enums::AccountTier;
+
+// Simple metadata struct for image generation
+pub struct ImageMetadata {
+    pub mime_type: String,
+    pub width: u32,
+    pub height: u32,
+}
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use tracing::{info, instrument};
@@ -57,23 +65,37 @@ struct OpenAIResponseMessage {
     content: String,
 }
 
+// OpenRouter image generation via chat completions
 #[derive(Debug, Serialize)]
-struct OpenAIImageRequest {
+struct OpenRouterImageRequest {
     model: String,
-    prompt: String,
-    n: u8,
-    size: String,
-    quality: String,
+    messages: Vec<OpenAIMessage>,
+    modalities: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    image_config: Option<ImageConfig>,
+}
+
+#[derive(Debug, Serialize)]
+struct ImageConfig {
+    aspect_ratio: String,
 }
 
 #[derive(Debug, Deserialize)]
-struct OpenAIImageResponse {
-    data: Vec<OpenAIImageData>,
+struct OpenRouterImageResponse {
+    choices: Vec<OpenRouterImageChoice>,
 }
 
 #[derive(Debug, Deserialize)]
-struct OpenAIImageData {
-    url: String,
+struct OpenRouterImageChoice {
+    message: OpenRouterImageMessage,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenRouterImageMessage {
+    #[serde(default)]
+    content: String,
+    #[serde(default)]
+    images: Vec<String>, // Base64-encoded data URLs
 }
 
 // JSON-structured response for continuations
@@ -104,7 +126,7 @@ impl AIService {
         }
     }
 
-    /// Generate image using OpenAI DALL-E
+    /// Generate image using OpenRouter
     #[instrument(skip(self, context, node))]
     pub async fn generate_image(
         &self,
@@ -112,134 +134,147 @@ impl AIService {
         node: &NodeContext,
         params: &ImageParams,
         account_tier: &AccountTier,
-    ) -> Result<(Vec<u8>, GeneratedImage)> {
-        let openai_key = self
-            .config
-            .openai_api_key
-            .as_ref()
-            .ok_or_else(|| ApiError::AIProvider("OpenAI API key not configured".to_string()))?;
-
+    ) -> Result<(Vec<u8>, ImageMetadata)> {
         // Build image prompt
         let prompt = self.build_image_prompt(context, node, params);
 
-        // Determine size and quality based on resolution and tier
-        let (size, quality) = match params.resolution.as_str() {
-            "high" | "hd" => {
-                // Pro tier: HD quality with larger size
-                match params.aspect_ratio.as_str() {
-                    "3:4" => ("1536x2048", "hd"),
-                    _ => ("1024x1024", "hd"),
-                }
-            }
-            _ => {
-                // Free tier or medium: standard quality
-                match params.aspect_ratio.as_str() {
-                    "3:4" => ("768x1024", "standard"),
-                    _ => ("1024x1024", "standard"),
-                }
-            }
+        // Select model based on tier
+        let image_config = match account_tier {
+            AccountTier::Pro => &self.config.openrouter.image_models.pro,
+            AccountTier::Free => &self.config.openrouter.image_models.free,
+        };
+        let model = image_config.model.clone();
+
+        // Determine aspect ratio
+        let aspect_ratio = match params.aspect_ratio.as_str() {
+            "3:4" => "3:4",
+            "4:3" => "4:3",
+            "16:9" => "16:9",
+            "9:16" => "9:16",
+            _ => "1:1",
         };
 
-        let request = OpenAIImageRequest {
-            model: "dall-e-3".to_string(),
-            prompt: prompt.clone(),
-            n: 1,
-            size: size.to_string(),
-            quality: quality.to_string(),
+        // Build request
+        let request = OpenRouterImageRequest {
+            model: model.clone(),
+            messages: vec![OpenAIMessage {
+                role: "user".to_string(),
+                content: prompt.clone(),
+            }],
+            modalities: vec!["image".to_string(), "text".to_string()],
+            image_config: Some(ImageConfig {
+                aspect_ratio: aspect_ratio.to_string(),
+            }),
         };
 
         info!(
-            "Generating image with DALL-E 3: size={}, quality={}, prompt_len={}",
-            size,
-            quality,
+            "Generating image with OpenRouter: model={}, aspect_ratio={}, prompt_len={}",
+            model,
+            aspect_ratio,
             prompt.len()
         );
 
-        // Call OpenAI API
+        // Call OpenRouter API
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::AUTHORIZATION,
+            format!("Bearer {}", self.config.openrouter.api_key)
+                .parse()
+                .unwrap(),
+        );
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            "application/json".parse().unwrap(),
+        );
+        if let Some(referer) = &self.config.openrouter.referer {
+            headers.insert(
+                reqwest::header::HeaderName::from_static("http-referer"),
+                referer.parse().unwrap(),
+            );
+        }
+        if let Some(app_title) = &self.config.openrouter.app_title {
+            headers.insert(
+                reqwest::header::HeaderName::from_static("x-title"),
+                app_title.parse().unwrap(),
+            );
+        }
+
         let response = self
             .http_client
-            .post("https://api.openai.com/v1/images/generations")
-            .header("Authorization", format!("Bearer {}", openai_key))
+            .post(format!("{}/chat/completions", self.config.openrouter.api_base))
+            .headers(headers)
             .json(&request)
-            .timeout(std::time::Duration::from_secs(60))
+            .timeout(std::time::Duration::from_secs(90))
             .send()
             .await
-            .map_err(|e| ApiError::AIProvider(format!("OpenAI image request failed: {}", e)))?;
+            .map_err(|e| ApiError::AIProvider(format!("OpenRouter image request failed: {}", e)))?;
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
             return Err(ApiError::AIProvider(format!(
-                "OpenAI image API error: {}",
+                "OpenRouter image API error: {}",
                 error_text
             )));
         }
 
-        let image_response: OpenAIImageResponse = response
+        let image_response: OpenRouterImageResponse = response
             .json()
             .await
             .map_err(|e| ApiError::AIProvider(format!("Failed to parse image response: {}", e)))?;
 
         info!(
-            "OpenAI image response: {} images returned",
-            image_response.data.len()
+            "OpenRouter image response: {} choices returned",
+            image_response.choices.len()
         );
 
-        let image_url = image_response
-            .data
+        // Extract base64 image data
+        let image_data_url = image_response
+            .choices
             .first()
+            .and_then(|choice| choice.message.images.first())
             .ok_or_else(|| ApiError::AIProvider("No image generated".to_string()))?
-            .url
             .clone();
 
-        // Download the generated image
-        info!("Downloading generated image from: {}", image_url);
-        let image_response = self
-            .http_client
-            .get(&image_url)
-            .timeout(std::time::Duration::from_secs(30))
-            .send()
-            .await
-            .map_err(|e| ApiError::AIProvider(format!("Failed to download image: {}", e)))?;
+        info!("Received image data URL, length: {}", image_data_url.len());
 
-        if !image_response.status().is_success() {
-            return Err(ApiError::AIProvider(format!(
-                "Image download failed with status: {}",
-                image_response.status()
-            )));
-        }
-
-        let image_bytes = image_response
-            .bytes()
-            .await
-            .map_err(|e| ApiError::AIProvider(format!("Failed to read image bytes: {}", e)))?
-            .to_vec();
-
-        // Parse size dimensions
-        let (width, height) = if size.contains('x') {
-            let parts: Vec<&str> = size.split('x').collect();
-            (
-                parts[0].parse().unwrap_or(1024),
-                parts[1].parse().unwrap_or(1024),
-            )
+        // Parse data URL: "data:image/png;base64,<base64_data>"
+        let base64_data = if image_data_url.starts_with("data:") {
+            image_data_url
+                .split(',')
+                .nth(1)
+                .ok_or_else(|| ApiError::AIProvider("Invalid image data URL format".to_string()))?
         } else {
-            (1024, 1024)
+            &image_data_url
+        };
+
+        // Decode base64 to bytes
+        let image_bytes = base64::engine::general_purpose::STANDARD
+            .decode(base64_data)
+            .map_err(|e| ApiError::AIProvider(format!("Failed to decode base64 image: {}", e)))?;
+
+        // Determine dimensions based on aspect ratio (approximate)
+        let (width, height) = match aspect_ratio {
+            "3:4" => (768, 1024),
+            "4:3" => (1024, 768),
+            "16:9" => (1024, 576),
+            "9:16" => (576, 1024),
+            _ => (1024, 1024),
         };
 
         info!(
-            "Generated and downloaded image: {}x{}, {} bytes",
+            "Generated image: {}x{}, {} bytes",
             width,
             height,
             image_bytes.len()
         );
 
-        let generated_image = GeneratedImage {
-            url: String::new(), // Will be replaced with storage URL by caller
+        let metadata = ImageMetadata {
             mime_type: "image/png".to_string(),
             width,
             height,
         };
 
-        Ok((image_bytes, generated_image))
+        Ok((image_bytes, metadata))
     }
 
     // ==================== Prompt Section Formatters ====================

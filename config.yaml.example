@@ -29,6 +29,15 @@ ai:
         # model: openrouter/google/gemini-pro-1.5-flash
         model: qwen/qwen3-235b-a22b:free
         max_context_tokens: 16000
+    image_models:
+      free:
+        model: openai/dall-e-3
+        size: 1024x1024
+        quality: standard
+      pro:
+        model: black-forest-labs/flux-1.1-pro
+        size: 1024x1024
+        quality: hd
     ai_routing:
       fix_grammar:
         free_default_tier: light

@@ -1,16 +1,16 @@
 use backvonia::{
-    config::{Config, QuotaConfig, StorageConfig},
+    config::QuotaConfig,
     models::{
         ai::{
             AIImageGenerateRequest, ImageParams, ImageStoryContext, ImageStyle, NodeContext,
         },
         common::AIOperation,
     },
-    services::{QuotaService, StorageService},
+    services::QuotaService,
 };
 use entity::sea_orm_active_enums::AccountTier;
 use migration::{Migrator, MigratorTrait};
-use sea_orm::{Database, DatabaseConnection};
+use sea_orm::{Database, DatabaseConnection, EntityTrait, QueryFilter, ColumnTrait};
 use uuid::Uuid;
 
 async fn setup_test_db() -> DatabaseConnection {
@@ -39,18 +39,6 @@ fn create_test_quota_config() -> QuotaConfig {
     }
 }
 
-fn create_test_storage_config() -> StorageConfig {
-    StorageConfig {
-        endpoint_url: "https://fake-endpoint.r2.cloudflarestorage.com".to_string(),
-        access_key_id: "test-access-key".to_string(),
-        secret_access_key: "test-secret-key".to_string(),
-        bucket_name: "test-bucket".to_string(),
-        region: "auto".to_string(),
-        public_base_url: None,
-        signed_url_expiration_seconds: 3600,
-    }
-}
-
 fn create_test_image_request() -> AIImageGenerateRequest {
     AIImageGenerateRequest {
         story_context: ImageStoryContext {
@@ -63,7 +51,7 @@ fn create_test_image_request() -> AIImageGenerateRequest {
         node: NodeContext {
             summary: Some("The hero discovers a mysterious artifact".to_string()),
             content: Some("Alice stepped into the crumbling hall...".to_string()),
-            tags: Some(vec!["discovery".to_string(), "artifact".to_string()]),
+            tags: vec!["discovery".to_string(), "artifact".to_string()],
         },
         image_params: ImageParams {
             style: Some(ImageStyle::Storybook),

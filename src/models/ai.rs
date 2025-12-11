@@ -317,7 +317,7 @@ pub struct AIImageGenerateResponse {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GeneratedImage {
-    pub url: String,
+    pub data: String, // base64-encoded image data
     pub mime_type: String,
     pub width: u32,
     pub height: u32,

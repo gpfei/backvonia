@@ -1,4 +1,5 @@
 use axum::{extract::State, Json};
+use base64::Engine;
 use tracing::instrument;
 
 use crate::{
@@ -7,9 +8,10 @@ use crate::{
     middleware::UserIdentity,
     models::{
         ai::{
-            AIImageGenerateRequest, AIImageGenerateResponse, AITextContinueRequest,
-            AITextContinueResponse, AITextEditMode, AITextEditRequest, AITextEditResponse,
-            AITextIdeasRequest, AITextSummarizeRequest, AITextSummarizeResponse,
+            AIImageGenerateRequest, AIImageGenerateResponse, GeneratedImage,
+            AITextContinueRequest, AITextContinueResponse, AITextEditMode, AITextEditRequest,
+            AITextEditResponse, AITextIdeasRequest, AITextSummarizeRequest,
+            AITextSummarizeResponse,
         },
         common::AIOperation,
     },
@@ -89,36 +91,16 @@ pub async fn image_generate(
     // Attempt image generation with error tracking
     let generation_result = async {
         // Generate image (returns image bytes + metadata)
-        let (image_bytes, mut image_metadata) = state
+        let (image_bytes, image_metadata) = state
             .ai_service
             .generate_image(&request.story_context, &request.node, &request.image_params, tier)
             .await?;
 
-        // Upload image to storage
-        let (permanent_url, file_size) = state
-            .storage_service
-            .upload_image(image_bytes, &image_metadata.mime_type, identity.user_id)
-            .await?;
+        // Encode to base64
+        let base64_data = base64::engine::general_purpose::STANDARD.encode(&image_bytes);
+        let file_size = image_bytes.len();
 
-        // Generate temporary signed URL
-        let key = state
-            .storage_service
-            .extract_key_from_url(&permanent_url)
-            .ok_or_else(|| ApiError::Internal(anyhow::anyhow!("Failed to extract storage key")))?;
-
-        let temp_url = state.storage_service.generate_signed_url(&key).await?;
-        let temp_url_expires_at = time::OffsetDateTime::now_utc()
-            + time::Duration::seconds(state.config.storage.signed_url_expiration_seconds as i64);
-
-        image_metadata.url = temp_url.clone();
-
-        Ok::<_, ApiError>((
-            permanent_url,
-            temp_url,
-            temp_url_expires_at,
-            file_size,
-            image_metadata,
-        ))
+        Ok::<_, ApiError>((base64_data, file_size, image_metadata))
     }
     .await;
 
@@ -126,7 +108,7 @@ pub async fn image_generate(
 
     // Handle result and save record
     match generation_result {
-        Ok((permanent_url, temp_url, temp_url_expires_at, file_size, image_metadata)) => {
+        Ok((base64_data, file_size, image_metadata)) => {
             // Save successful generation record
             let generation_record = ai_image_generation::ActiveModel {
                 id: Set(Uuid::new_v4()),
@@ -140,9 +122,9 @@ pub async fn image_generate(
                     .map(|s| s.as_str().to_string())
                     .unwrap_or_else(|| "illustration".to_string())),
                 resolution: Set(request.image_params.resolution.clone()),
-                image_url: Set(permanent_url),
-                temp_url: Set(Some(temp_url)),
-                temp_url_expires_at: Set(Some(temp_url_expires_at)),
+                image_url: Set(String::new()), // No longer storing image URL
+                temp_url: Set(None),
+                temp_url_expires_at: Set(None),
                 width: Set(image_metadata.width as i32),
                 height: Set(image_metadata.height as i32),
                 file_size_bytes: Set(Some(file_size as i32)),
@@ -160,7 +142,12 @@ pub async fn image_generate(
                 .map_err(|e| ApiError::Database(e))?;
 
             Ok(Json(AIImageGenerateResponse {
-                image: image_metadata,
+                image: GeneratedImage {
+                    data: base64_data,
+                    mime_type: image_metadata.mime_type,
+                    width: image_metadata.width,
+                    height: image_metadata.height,
+                },
             }))
         }
         Err(err) => {

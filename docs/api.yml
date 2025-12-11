@@ -414,10 +414,12 @@ paths:
         **Image Specifications:**
         - Aspect ratio: 3:4 (portrait orientation for story illustrations)
         - Resolution: medium (768x1024 approx) for free tier, high (1536x2048 approx) for Pro tier
-        - Format: JPEG
-        - Delivery: Temporary URL valid for 1 hour (client must download and store locally)
+        - Format: PNG
+        - Delivery: Base64-encoded image data in response (client decodes and stores locally)
 
         **Generation Time:** 10-30 seconds typical
+
+        **Response Size:** Approximately 350-700KB (base64-encoded image)
 
         **Validation:**
         - At least one of `node.summary` or `node.content` must be non-empty
@@ -471,15 +473,15 @@ paths:
                     resolution: "high"
       responses:
         '200':
-          description: AI generated image metadata with temporary download URL
+          description: AI generated image with base64-encoded data
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AIImageGenerateResponse'
               example:
                 image:
-                  url: "https://cdn.talevonia.app/temp/abc123def456.jpg?expires=1704067200"
-                  mimeType: "image/jpeg"
+                  data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+                  mimeType: "image/png"
                   width: 768
                   height: 1024
         '400':
@@ -1364,7 +1366,8 @@ components:
               example: "The Echo Keeper"
             language:
               type: string
-              description: BCP-47 language code (auto-detected from content by client)
+              nullable: true
+              description: BCP-47 language code (optional - backend will auto-detect from title + content if not provided)
               example: "en"
             genre:
               type: string
@@ -1382,7 +1385,7 @@ components:
               description: Optional story setting for environment context (max 500 chars)
               maxLength: 500
               example: "A world where memories are stored in crystal towers"
-          required: [title, language]
+          required: [title]
         node:
           type: object
           properties:
@@ -1443,15 +1446,15 @@ components:
     GeneratedImage:
       type: object
       properties:
-        url:
+        data:
           type: string
-          format: uri
-          description: Temporary download URL (valid for 1 hour)
-          example: "https://cdn.talevonia.app/temp/abc123def456.jpg?expires=1704067200"
+          format: byte
+          description: Base64-encoded image data (PNG format)
+          example: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
         mimeType:
           type: string
           description: Image MIME type
-          example: "image/jpeg"
+          example: "image/png"
         width:
           type: integer
           description: Image width in pixels
@@ -1460,7 +1463,7 @@ components:
           type: integer
           description: Image height in pixels
           example: 1024
-      required: [url, mimeType, width, height]
+      required: [data, mimeType, width, height]
 
     AIImageGenerateResponse:
       type: object
