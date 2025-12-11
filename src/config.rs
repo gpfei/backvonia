@@ -110,8 +110,8 @@ pub struct AuthConfig {
     pub jwt_secret: String,
     pub access_token_expiration_minutes: u64,
     pub refresh_token_expiration_days: u64,
-    pub apple_client_id: String, // Apple Sign In client ID (bundle ID)
-    pub apple_team_id: String,   // Apple developer team ID
+    pub apple_client_id: String,   // Apple Sign In client ID (bundle ID)
+    pub apple_team_id: String,     // Apple developer team ID
     pub welcome_bonus_amount: i32, // Welcome bonus credits for new users
 }
 

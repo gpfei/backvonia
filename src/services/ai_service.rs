@@ -2,10 +2,9 @@ use crate::{
     config::{AIConfig, ModelTierConfig, TaskRouting},
     error::{ApiError, Result},
     models::ai::{
-        AITextEditMode, Background, Character, EditInput, EditParams,
-        GenerationParams, ImageParams, ImageStoryContext, ImageStyle, NodeContext, NodeSummary,
-        NodeToSummarize, PathNode, StoryContext, StoryContextSimple, TextCandidate,
-        TextEditCandidate,
+        AITextEditMode, Background, Character, EditInput, EditParams, GenerationParams,
+        ImageParams, ImageStoryContext, ImageStyle, NodeContext, NodeSummary, NodeToSummarize,
+        PathNode, StoryContext, StoryContextSimple, TextCandidate, TextEditCandidate,
     },
 };
 use base64::Engine;
@@ -201,7 +200,10 @@ impl AIService {
 
         let response = self
             .http_client
-            .post(format!("{}/chat/completions", self.config.openrouter.api_base))
+            .post(format!(
+                "{}/chat/completions",
+                self.config.openrouter.api_base
+            ))
             .headers(headers)
             .json(&request)
             .timeout(std::time::Duration::from_secs(90))
@@ -581,8 +583,7 @@ impl AIService {
         let characters = Self::format_characters_section(&context.active_characters);
         let story_content = Self::format_story_content_detailed(nodes);
 
-        let has_context =
-            context.background.is_some() || context.active_characters.is_some();
+        let has_context = context.background.is_some() || context.active_characters.is_some();
         let generation_instructions =
             Self::format_prose_instructions(params, instructions, has_context);
 
@@ -1257,7 +1258,7 @@ Each continuation should present a different plot direction, character choice, o
             ],
             max_tokens: (params.max_words * params.num_candidates as u32 * 2) as u32,
             temperature: 0.7,
-            n: 1,  // Single response with JSON array
+            n: 1, // Single response with JSON array
             response_format: Some(ResponseFormat {
                 format_type: "json_object".to_string(),
             }),
@@ -1269,7 +1270,10 @@ Each continuation should present a different plot direction, character choice, o
         // Parse JSON response
         let json_response: ContinuationsJsonResponse = serde_json::from_str(&response_text)
             .map_err(|e| {
-                ApiError::AIProvider(format!("Failed to parse JSON response: {}. Response: {}", e, response_text))
+                ApiError::AIProvider(format!(
+                    "Failed to parse JSON response: {}. Response: {}",
+                    e, response_text
+                ))
             })?;
 
         // Convert to TextCandidate
@@ -1340,9 +1344,9 @@ Each idea should suggest a distinct narrative direction: character decision, plo
                     content: user_prompt,
                 },
             ],
-            max_tokens: (params.max_words * params.num_candidates as u32 * 2) as u32,  // 2x for titles + JSON overhead
-            temperature: 0.8,  // Higher creativity for ideas
-            n: 1,  // Single response with JSON array
+            max_tokens: (params.max_words * params.num_candidates as u32 * 2) as u32, // 2x for titles + JSON overhead
+            temperature: 0.8, // Higher creativity for ideas
+            n: 1,             // Single response with JSON array
             response_format: Some(ResponseFormat {
                 format_type: "json_object".to_string(),
             }),
@@ -1354,7 +1358,10 @@ Each idea should suggest a distinct narrative direction: character decision, plo
         // Parse JSON response
         let json_response: ContinuationsJsonResponse = serde_json::from_str(&response_text)
             .map_err(|e| {
-                ApiError::AIProvider(format!("Failed to parse JSON response: {}. Response: {}", e, response_text))
+                ApiError::AIProvider(format!(
+                    "Failed to parse JSON response: {}. Response: {}",
+                    e, response_text
+                ))
             })?;
 
         // Convert to TextCandidate
@@ -1411,7 +1418,8 @@ Each idea should suggest a distinct narrative direction: character decision, plo
                         let text = resp.text().await.unwrap_or_default();
                         if status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS {
                             attempts += 1;
-                            last_err = Some(format!("OpenRouter error {}: {}", status.as_u16(), text));
+                            last_err =
+                                Some(format!("OpenRouter error {}: {}", status.as_u16(), text));
                             tokio::time::sleep(std::time::Duration::from_millis(
                                 200 * attempts as u64,
                             ))
