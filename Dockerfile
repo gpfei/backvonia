@@ -27,12 +27,15 @@ RUN cargo fetch --locked
 # Copy source
 COPY src src
 
+# Create a permanent directory for the output
+RUN mkdir -p /app/dist
+
 # Cache only Cargo registries/git; keep build artifacts in the image layer
 # so the runtime stage can COPY the binary.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
-    cargo build --release --locked
+    cargo build --release --locked && mv /app/target/release/backvonia /app/dist/backvonia
 
 FROM debian:trixie-slim AS runtime
 
@@ -43,7 +46,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY --from=builder /app/target/release/backvonia /usr/local/bin/backvonia
+COPY --from=builder /app/dist/backvonia /usr/local/bin/backvonia
 
 RUN useradd -m -u 10001 appuser
 USER appuser
