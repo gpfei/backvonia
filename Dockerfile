@@ -34,11 +34,13 @@ RUN mkdir -p /app/dist
 # so the runtime stage can COPY the binaries.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target \
     cargo build -p backvonia --release --locked \
     && cp /app/target/release/backvonia /app/dist/backvonia
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target \
     cargo build -p migration --release --locked \
     && cp /app/target/release/migration /app/dist/backvonia-migrate
 
@@ -53,7 +55,6 @@ WORKDIR /app
 
 COPY --from=builder /app/dist/backvonia /usr/local/bin/backvonia
 COPY --from=builder /app/dist/backvonia-migrate /usr/local/bin/backvonia-migrate
-COPY config.yaml /app/config.yaml
 
 RUN useradd -m -u 10001 appuser
 USER appuser
