@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  backvonia:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: backvonia:latest
+
+  migrate:
+    image: backvonia:latest
+
