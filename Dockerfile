@@ -27,8 +27,10 @@ RUN cargo fetch --locked
 # Copy source
 COPY src src
 
+# Cache only Cargo registries/git; keep build artifacts in the image layer
+# so the runtime stage can COPY the binary.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target \
+    --mount=type=cache,target=/usr/local/cargo/git \
     cargo build --release --locked
 
 FROM debian:trixie-slim AS runtime
