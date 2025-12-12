@@ -22,24 +22,9 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    restart: unless-stopped
-
-  caddy:
-    image: caddy:2-alpine
-    container_name: talevonia-caddy
-    depends_on:
-      - backvonia
     ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      # Provide in .env: DOMAIN=api.example.com, EMAIL=you@example.com (optional)
-      DOMAIN: ${DOMAIN}
-      EMAIL: ${EMAIL:-}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
+      # Bind only to localhost; reverse-proxy from host/rootful Caddy.
+      - "127.0.0.1:8080:8080"
     restart: unless-stopped
 
   postgres:
@@ -75,5 +60,3 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  caddy_data:
-  caddy_config:

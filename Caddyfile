@@ -6,7 +6,11 @@
 # Set DOMAIN in .env, e.g. DOMAIN=api.talevonia.app
 {$DOMAIN} {
   encode gzip
-  reverse_proxy backvonia:8080
+  # For rootless deployments, run Caddy outside the compose network and set:
+  # UPSTREAM=127.0.0.1:8080
+  # For docker compose local dev, you can set:
+  # UPSTREAM=backvonia:8080
+  reverse_proxy {$UPSTREAM:127.0.0.1:8080}
 
   # Basic security headers
   header {
@@ -21,4 +25,3 @@
     format console
   }
 }
-

@@ -53,9 +53,9 @@ jobs:
             set -euo pipefail
             cd ${{ secrets.DEPLOY_PATH }}
 
-            echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u "${{ secrets.GHCR_USER || github.actor }}" --password-stdin
+            echo "${{ secrets.GHCR_PAT }}" | podman login ghcr.io -u "${{ secrets.GHCR_USER || github.actor }}" --password-stdin
 
-            docker compose pull backvonia
-            docker compose up -d --no-deps backvonia
-            docker image prune -f
+            podman compose pull backvonia
+            podman compose up -d --no-deps backvonia
+            podman image prune -f
 
