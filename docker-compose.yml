@@ -27,6 +27,23 @@ services:
       - "127.0.0.1:8080:8080"
     restart: unless-stopped
 
+  migrate:
+    image: backvonia:latest
+    container_name: talevonia-migrate
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://postgres:dev@postgres:5432/talevonia
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["/usr/local/bin/backvonia-migrate"]
+    command: ["up"]
+    profiles: ["tools"]
+    restart: "no"
+
   postgres:
     image: postgres:16-alpine
     container_name: talevonia-postgres
