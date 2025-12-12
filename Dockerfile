@@ -41,7 +41,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY --from=builder /app/target/release/backvonia /usr/local/bin/backvonia
-COPY config.yaml /app/config.yaml
 
 RUN useradd -m -u 10001 appuser
 USER appuser
