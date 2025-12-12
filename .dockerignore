@@ -1,0 +1,13 @@
+target
+**/target
+.git
+.github
+.env
+.env.*
+docs
+claudedocs
+scripts
+tests
+docker-compose.yml
+Caddyfile
+*.md

@@ -1,8 +1,47 @@
 version: '3.8'
 
 services:
+  backvonia:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: backvonia:latest
+    container_name: talevonia-backvonia
+    env_file:
+      - .env
+    environment:
+      # Override local URLs from .env to use compose service names
+      DATABASE_URL: postgresql://postgres:dev@postgres:5432/talevonia
+      REDIS_URL: redis://redis:6379
+      HOST: 0.0.0.0
+      PORT: 8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: talevonia-caddy
+    depends_on:
+      - backvonia
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Provide in .env: DOMAIN=api.example.com, EMAIL=you@example.com (optional)
+      DOMAIN: ${DOMAIN}
+      EMAIL: ${EMAIL:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
   postgres:
-    image: postgres:18-alpine
+    image: postgres:16-alpine
     container_name: talevonia-postgres
     environment:
       POSTGRES_USER: postgres
@@ -34,3 +73,5 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  caddy_data:
+  caddy_config:
