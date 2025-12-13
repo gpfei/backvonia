@@ -113,7 +113,6 @@ pub struct QuotaConfig {
     // Limits are expressed in weighted quota units (see AIOperation::cost)
     pub free_text_daily_limit: i32,
     pub pro_text_daily_limit: i32,
-    pub pro_image_daily_limit: i32,
 }
 
 impl Config {
@@ -125,9 +124,6 @@ impl Config {
         let config = config::Config::builder()
             // Start with defaults from config.yaml (optional - allows running without config file)
             .add_source(config::File::with_name("config").required(false))
-            // Server
-            // .set_default("server.host", default_host())?
-            // .set_default("server.port", default_port())?
             .set_override_option("server.host", env::var("HOST").ok())?
             .set_override_option(
                 "server.port",
