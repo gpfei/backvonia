@@ -16,6 +16,7 @@ use crate::{
     },
 };
 use entity::ai_image_generation;
+use entity::sea_orm_active_enums::AccountTier;
 use sea_orm::{ActiveModelTrait, Set};
 use uuid::Uuid;
 
@@ -44,6 +45,23 @@ pub async fn text_continue(
 
     let tier = &identity.account_tier;
 
+    // Validate word limits before charging credits
+    let max_words_limit = match tier {
+        AccountTier::Pro => state.config.ai.openrouter.ai_routing.r#continue.max_words_pro,
+        AccountTier::Free => state.config.ai.openrouter.ai_routing.r#continue.max_words_free,
+    };
+    if request.generation_params.min_words > request.generation_params.max_words {
+        return Err(ApiError::BadRequest(
+            "minWords must be <= maxWords".to_string(),
+        ));
+    }
+    if request.generation_params.max_words > max_words_limit {
+        return Err(ApiError::BadRequest(format!(
+            "maxWords exceeds tier limit (max {})",
+            max_words_limit
+        )));
+    }
+
     // Atomically check and increment quota with weighted cost
     state
         .quota_service
@@ -51,12 +69,20 @@ pub async fn text_continue(
         .await?;
 
     // Generate prose continuations using JSON-structured output
+    let generation_params = crate::models::ai::GenerationParams {
+        num_candidates: if *tier == AccountTier::Pro { 3 } else { 1 },
+        min_words: request.generation_params.min_words,
+        max_words: request.generation_params.max_words,
+        tone: request.generation_params.tone.clone(),
+        avoid_hard_end: request.generation_params.avoid_hard_end,
+    };
+
     let generation_result = state
         .ai_service
         .generate_prose_continuations(
             &request.story_context,
             &request.path_nodes,
-            &request.generation_params,
+            &generation_params,
             request.instructions.as_deref(),
             tier,
         )
@@ -64,7 +90,12 @@ pub async fn text_continue(
 
     // Handle errors with credit refund
     match generation_result {
-        Ok(candidates) => Ok(Json(AITextContinueResponse { candidates })),
+        Ok(mut candidates) => {
+            if *tier != AccountTier::Pro {
+                candidates.truncate(1);
+            }
+            Ok(Json(AITextContinueResponse { candidates }))
+        }
         Err(err) => {
             // Refund credits after failed generation
             if let Err(refund_err) = state
@@ -272,23 +303,36 @@ pub async fn text_edit(
         .await?;
 
     // Generate edit candidates
+    let edit_params = crate::models::ai::EditParams {
+        num_candidates: if *tier == AccountTier::Pro { 3 } else { 1 },
+        target_length: request.edit_params.target_length.clone(),
+        tone: request.edit_params.tone.clone(),
+        language: request.edit_params.language.clone(),
+        keep_style: request.edit_params.keep_style,
+    };
+
     let generation_result = state
         .ai_service
         .generate_text_edit(
             request.mode,
             request.story_context.as_ref(),
             &request.input,
-            &request.edit_params,
+            &edit_params,
             tier,
         )
         .await;
 
     // Handle errors with credit refund
     match generation_result {
-        Ok(candidates) => Ok(Json(AITextEditResponse {
-            mode: request.mode,
-            candidates,
-        })),
+        Ok(mut candidates) => {
+            if *tier != AccountTier::Pro {
+                candidates.truncate(1);
+            }
+            Ok(Json(AITextEditResponse {
+                mode: request.mode,
+                candidates,
+            }))
+        }
         Err(err) => {
             // Refund credits after failed generation
             if let Err(refund_err) = state
@@ -337,6 +381,23 @@ pub async fn text_ideas(
 
     let tier = &identity.account_tier;
 
+    // Validate word limits before charging credits
+    let max_words_limit = match tier {
+        AccountTier::Pro => state.config.ai.openrouter.ai_routing.ideas.max_words_pro,
+        AccountTier::Free => state.config.ai.openrouter.ai_routing.ideas.max_words_free,
+    };
+    if request.generation_params.min_words > request.generation_params.max_words {
+        return Err(ApiError::BadRequest(
+            "minWords must be <= maxWords".to_string(),
+        ));
+    }
+    if request.generation_params.max_words > max_words_limit {
+        return Err(ApiError::BadRequest(format!(
+            "maxWords exceeds tier limit (max {})",
+            max_words_limit
+        )));
+    }
+
     // Atomically check and increment quota with weighted cost
     state
         .quota_service
@@ -344,12 +405,20 @@ pub async fn text_ideas(
         .await?;
 
     // Generate continuation ideas using JSON-structured output
+    let generation_params = crate::models::ai::GenerationParams {
+        num_candidates: if *tier == AccountTier::Pro { 3 } else { 1 },
+        min_words: request.generation_params.min_words,
+        max_words: request.generation_params.max_words,
+        tone: request.generation_params.tone.clone(),
+        avoid_hard_end: request.generation_params.avoid_hard_end,
+    };
+
     let generation_result = state
         .ai_service
         .generate_continuation_ideas(
             &request.story_context,
             &request.path_nodes,
-            &request.generation_params,
+            &generation_params,
             request.instructions.as_deref(),
             tier,
         )
@@ -357,7 +426,12 @@ pub async fn text_ideas(
 
     // Handle errors with credit refund
     match generation_result {
-        Ok(candidates) => Ok(Json(AITextContinueResponse { candidates })),
+        Ok(mut candidates) => {
+            if *tier != AccountTier::Pro {
+                candidates.truncate(1);
+            }
+            Ok(Json(AITextContinueResponse { candidates }))
+        }
         Err(err) => {
             // Refund credits after failed generation
             if let Err(refund_err) = state

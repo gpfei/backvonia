@@ -44,18 +44,26 @@ ai:
         free_default_tier: standard
         pro_default_tier: premium
         downgrade_over_chars: 2500
+        max_words_free: 300
+        max_words_pro: 500
       ideas:
         free_default_tier: standard
         pro_default_tier: premium
         downgrade_over_chars: 2500
+        max_words_free: 300
+        max_words_pro: 500
       continue:
         free_default_tier: standard
         pro_default_tier: premium
         downgrade_over_chars: 2500
+        max_words_free: 300
+        max_words_pro: 500
       expand:
         free_default_tier: standard
         pro_default_tier: premium
         downgrade_over_chars: 2500
+        max_words_free: 300
+        max_words_pro: 500
   # openai_api_key: ${OPENAI_API_KEY} # only needed for images
 
 iap:

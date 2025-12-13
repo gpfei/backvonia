@@ -671,6 +671,12 @@ Note: Generate ideas in the same language as the story content. If you cannot de
         params: &EditParams,
         account_tier: &AccountTier,
     ) -> Result<Vec<TextEditCandidate>> {
+        let effective_num_candidates = if *account_tier == AccountTier::Pro {
+            params.num_candidates
+        } else {
+            1
+        };
+
         let system_prompt = self.build_edit_system_prompt(mode);
         let user_prompt = self.build_edit_user_prompt(mode, story_context, input, params);
 
@@ -692,7 +698,7 @@ Note: Generate ideas in the same language as the story content. If you cannot de
             ],
             max_tokens: 2000,
             temperature: 0.7,
-            n: params.num_candidates,
+            n: effective_num_candidates,
             response_format: None,
         };
 
@@ -766,7 +772,7 @@ Note: Generate ideas in the same language as the story content. If you cannot de
                         );
                     }
 
-                    let candidates = openai_response
+                    let mut candidates: Vec<TextEditCandidate> = openai_response
                         .choices
                         .into_iter()
                         .enumerate()
@@ -784,9 +790,11 @@ Note: Generate ideas in the same language as the story content. If you cannot de
                         })
                         .collect();
 
+                    candidates.truncate(effective_num_candidates as usize);
+
                     info!(
                         "Generated {} edit candidates in mode {:?} using model {} (downgraded={}, attempts={})",
-                        params.num_candidates,
+                        candidates.len(),
                         mode,
                         model.model,
                         model.downgraded,
@@ -1147,21 +1155,25 @@ impl From<AITextEditMode> for TaskKind {
 }
 
 impl AIService {
-    fn select_model(
-        &self,
-        task: TaskKind,
-        account_tier: &AccountTier,
-        input_chars: usize,
-    ) -> Result<SelectedModel> {
-        let routing: &TaskRouting = match task {
+    fn routing_for_task(&self, task: TaskKind) -> &TaskRouting {
+        match task {
             TaskKind::FixGrammar => &self.config.openrouter.ai_routing.fix_grammar,
             TaskKind::Shorten => &self.config.openrouter.ai_routing.shorten,
             TaskKind::Rewrite => &self.config.openrouter.ai_routing.rewrite,
             TaskKind::Ideas => &self.config.openrouter.ai_routing.ideas,
             TaskKind::Continue => &self.config.openrouter.ai_routing.r#continue,
             TaskKind::Expand => &self.config.openrouter.ai_routing.expand,
-            TaskKind::Summarize => &self.config.openrouter.ai_routing.fix_grammar, // Reuse light task
-        };
+            TaskKind::Summarize => &self.config.openrouter.ai_routing.fix_grammar,
+        }
+    }
+
+    fn select_model(
+        &self,
+        task: TaskKind,
+        account_tier: &AccountTier,
+        input_chars: usize,
+    ) -> Result<SelectedModel> {
+        let routing: &TaskRouting = self.routing_for_task(task);
 
         let mut tier_name = match account_tier {
             AccountTier::Free => routing.free_default_tier.as_str(),
@@ -1198,6 +1210,34 @@ impl AIService {
         })
     }
 
+    fn validate_generation_params(
+        &self,
+        task: TaskKind,
+        params: &GenerationParams,
+        account_tier: &AccountTier,
+    ) -> Result<()> {
+        if params.min_words > params.max_words {
+            return Err(ApiError::BadRequest(
+                "minWords must be <= maxWords".to_string(),
+            ));
+        }
+
+        let routing = self.routing_for_task(task);
+        let limit = match account_tier {
+            AccountTier::Pro => routing.max_words_pro,
+            AccountTier::Free => routing.max_words_free,
+        };
+
+        if params.max_words > limit {
+            return Err(ApiError::BadRequest(format!(
+                "maxWords exceeds tier limit (max {})",
+                limit
+            )));
+        }
+
+        Ok(())
+    }
+
     /// Generate prose story continuations using delimited text format
     #[instrument(skip(self, context, nodes, account_tier))]
     pub async fn generate_prose_continuations(
@@ -1208,6 +1248,20 @@ impl AIService {
         instructions: Option<&str>,
         account_tier: &AccountTier,
     ) -> Result<Vec<TextCandidate>> {
+        self.validate_generation_params(TaskKind::Continue, params, account_tier)?;
+
+        let effective_params = GenerationParams {
+            num_candidates: if *account_tier == AccountTier::Pro {
+                params.num_candidates
+            } else {
+                1
+            },
+            min_words: params.min_words,
+            max_words: params.max_words,
+            tone: params.tone.clone(),
+            avoid_hard_end: params.avoid_hard_end,
+        };
+
         // Build prompt with delimited text format (more reliable than JSON)
         let system_prompt = format!(
             r#"You are a creative writing assistant for Talevonia, a branching narrative app.
@@ -1221,10 +1275,10 @@ CONTENT: [story continuation text]
 
 Replace N with the candidate number (1, 2, 3, etc.).
 Each continuation should explore a different narrative direction."#,
-            params.num_candidates, params.min_words, params.max_words
+            effective_params.num_candidates, effective_params.min_words, effective_params.max_words
         );
 
-        let user_prompt = self.build_text_prompt(context, nodes, params, instructions);
+        let user_prompt = self.build_text_prompt(context, nodes, &effective_params, instructions);
 
         // Choose model
         let input_chars = user_prompt.len() + system_prompt.len();
@@ -1232,13 +1286,18 @@ Each continuation should explore a different narrative direction."#,
 
         // Calculate max_tokens for delimited format (simpler than JSON, less overhead)
         // Each continuation needs: delimiter (~10 tokens) + title (10-20 tokens) + content (max_words * 1.5 tokens)
-        let tokens_per_continuation = (params.max_words as f32 * 1.5) as u32 + 40; // content + title + delimiter
-        let format_overhead = params.num_candidates as u32 * 15 + 50; // minimal overhead for delimiters
-        let max_tokens = tokens_per_continuation * params.num_candidates as u32 + format_overhead;
+        let tokens_per_continuation = (effective_params.max_words as f32 * 1.5) as u32 + 40; // content + title + delimiter
+        let format_overhead = effective_params.num_candidates as u32 * 15 + 50; // minimal overhead for delimiters
+        let max_tokens =
+            tokens_per_continuation * effective_params.num_candidates as u32 + format_overhead;
 
         info!(
             "Prose continuation request: model={}, max_words={}, num_candidates={}, calculated_max_tokens={}, tokens_per_item={}",
-            model.model, params.max_words, params.num_candidates, max_tokens, tokens_per_continuation
+            model.model,
+            effective_params.max_words,
+            effective_params.num_candidates,
+            max_tokens,
+            tokens_per_continuation
         );
 
         // Prepare request with plain text format (no JSON)
@@ -1264,7 +1323,8 @@ Each continuation should explore a different narrative direction."#,
         let response_text = self.call_openrouter_api(request).await?;
 
         // Parse delimited text response
-        let candidates = self.parse_delimited_continuations(&response_text)?;
+        let mut candidates = self.parse_delimited_continuations(&response_text)?;
+        candidates.truncate(effective_params.num_candidates as usize);
 
         info!(
             "Generated {} prose continuations using model {} (delimited format)",
@@ -1335,6 +1395,20 @@ Each continuation should explore a different narrative direction."#,
         instructions: Option<&str>,
         account_tier: &AccountTier,
     ) -> Result<Vec<TextCandidate>> {
+        self.validate_generation_params(TaskKind::Ideas, params, account_tier)?;
+
+        let effective_params = GenerationParams {
+            num_candidates: if *account_tier == AccountTier::Pro {
+                params.num_candidates
+            } else {
+                1
+            },
+            min_words: params.min_words,
+            max_words: params.max_words,
+            tone: params.tone.clone(),
+            avoid_hard_end: params.avoid_hard_end,
+        };
+
         // Build prompt with delimited format (more reliable than JSON)
         let system_prompt = format!(
             r#"You are a creative writing assistant for Talevonia, a branching narrative app.
@@ -1348,23 +1422,28 @@ CONTENT: [brief description of what happens in this branch]
 
 Replace N with the candidate number (1, 2, 3, etc.).
 Each idea should suggest a distinct narrative direction: character decision, plot twist, or setting change."#,
-            params.num_candidates, params.min_words, params.max_words
+            effective_params.num_candidates, effective_params.min_words, effective_params.max_words
         );
 
-        let user_prompt = self.build_ideas_prompt(context, nodes, params, instructions);
+        let user_prompt = self.build_ideas_prompt(context, nodes, &effective_params, instructions);
 
         // Choose model
         let input_chars = user_prompt.len() + system_prompt.len();
         let model = self.select_model(TaskKind::Ideas, account_tier, input_chars)?;
 
         // Calculate max_tokens for delimited format (simpler than JSON, less overhead)
-        let tokens_per_continuation = (params.max_words as f32 * 1.5) as u32 + 40; // content + title + delimiter
-        let format_overhead = params.num_candidates as u32 * 15 + 50; // minimal overhead for delimiters
-        let max_tokens = tokens_per_continuation * params.num_candidates as u32 + format_overhead;
+        let tokens_per_continuation = (effective_params.max_words as f32 * 1.5) as u32 + 40; // content + title + delimiter
+        let format_overhead = effective_params.num_candidates as u32 * 15 + 50; // minimal overhead for delimiters
+        let max_tokens =
+            tokens_per_continuation * effective_params.num_candidates as u32 + format_overhead;
 
         info!(
             "Ideas request: model={}, max_words={}, num_candidates={}, calculated_max_tokens={}, tokens_per_item={}",
-            model.model, params.max_words, params.num_candidates, max_tokens, tokens_per_continuation
+            model.model,
+            effective_params.max_words,
+            effective_params.num_candidates,
+            max_tokens,
+            tokens_per_continuation
         );
 
         // Prepare request with plain text format (no JSON)
@@ -1390,7 +1469,8 @@ Each idea should suggest a distinct narrative direction: character decision, plo
         let response_text = self.call_openrouter_api(request).await?;
 
         // Parse delimited text response
-        let candidates = self.parse_delimited_continuations(&response_text)?;
+        let mut candidates = self.parse_delimited_continuations(&response_text)?;
+        candidates.truncate(effective_params.num_candidates as usize);
 
         info!(
             "Generated {} continuation ideas using model {} (delimited format)",

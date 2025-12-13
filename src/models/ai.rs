@@ -101,7 +101,7 @@ pub struct GenerationParams {
     #[validate(range(min = 10, max = 500))]
     pub min_words: u32,
     #[serde(default = "default_max_words")]
-    #[validate(range(min = 10, max = 1000))]
+    #[validate(range(min = 10, max = 500))]
     pub max_words: u32,
     #[validate(length(max = 100))]
     pub tone: Option<String>,

@@ -48,6 +48,14 @@ pub struct OpenRouterConfig {
     pub retry_attempts: u8,
 }
 
+fn default_task_max_words_free() -> u32 {
+    300
+}
+
+fn default_task_max_words_pro() -> u32 {
+    500
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ImageModels {
     pub free: ImageModelConfig,
@@ -87,6 +95,10 @@ pub struct TaskRouting {
     pub pro_default_tier: String,
     #[serde(default)]
     pub downgrade_over_chars: Option<usize>,
+    #[serde(default = "default_task_max_words_free")]
+    pub max_words_free: u32,
+    #[serde(default = "default_task_max_words_pro")]
+    pub max_words_pro: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -134,6 +146,54 @@ impl Config {
             .set_override_option(
                 "ai.openrouter.api_base",
                 env::var("OPENROUTER_API_BASE").ok(),
+            )?
+            .set_override_option(
+                "ai.openrouter.ai_routing.continue.max_words_free",
+                env::var("OPENROUTER_CONTINUE_MAX_WORDS_FREE")
+                    .ok()
+                    .and_then(|v| v.parse::<u32>().ok()),
+            )?
+            .set_override_option(
+                "ai.openrouter.ai_routing.continue.max_words_pro",
+                env::var("OPENROUTER_CONTINUE_MAX_WORDS_PRO")
+                    .ok()
+                    .and_then(|v| v.parse::<u32>().ok()),
+            )?
+            .set_override_option(
+                "ai.openrouter.ai_routing.ideas.max_words_free",
+                env::var("OPENROUTER_IDEAS_MAX_WORDS_FREE")
+                    .ok()
+                    .and_then(|v| v.parse::<u32>().ok()),
+            )?
+            .set_override_option(
+                "ai.openrouter.ai_routing.ideas.max_words_pro",
+                env::var("OPENROUTER_IDEAS_MAX_WORDS_PRO")
+                    .ok()
+                    .and_then(|v| v.parse::<u32>().ok()),
+            )?
+            .set_override_option(
+                "ai.openrouter.ai_routing.expand.max_words_free",
+                env::var("OPENROUTER_EXPAND_MAX_WORDS_FREE")
+                    .ok()
+                    .and_then(|v| v.parse::<u32>().ok()),
+            )?
+            .set_override_option(
+                "ai.openrouter.ai_routing.expand.max_words_pro",
+                env::var("OPENROUTER_EXPAND_MAX_WORDS_PRO")
+                    .ok()
+                    .and_then(|v| v.parse::<u32>().ok()),
+            )?
+            .set_override_option(
+                "ai.openrouter.ai_routing.rewrite.max_words_free",
+                env::var("OPENROUTER_REWRITE_MAX_WORDS_FREE")
+                    .ok()
+                    .and_then(|v| v.parse::<u32>().ok()),
+            )?
+            .set_override_option(
+                "ai.openrouter.ai_routing.rewrite.max_words_pro",
+                env::var("OPENROUTER_REWRITE_MAX_WORDS_PRO")
+                    .ok()
+                    .and_then(|v| v.parse::<u32>().ok()),
             )?
             // IAP
             .set_override_option(

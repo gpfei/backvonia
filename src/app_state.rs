@@ -18,6 +18,7 @@ pub struct AppState {
     pub credits_service: Arc<CreditsService>,
     pub jwt_service: Arc<JWTService>,
     pub auth_service: Arc<AuthService>,
+    pub config: Arc<Config>,
 }
 
 impl AppState {
@@ -62,6 +63,7 @@ impl AppState {
             credits_service,
             jwt_service,
             auth_service,
+            config: config_arc,
         })
     }
 }
