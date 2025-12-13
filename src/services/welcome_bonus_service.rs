@@ -1,7 +1,4 @@
-use crate::{
-    error::{ApiError, Result},
-    services::credits_service::CreditsService,
-};
+use crate::{error::Result, services::credits_service::CreditsService};
 use sea_orm::{entity::*, DatabaseConnection, PaginatorTrait, QueryFilter, TransactionTrait};
 use tracing::{info, instrument};
 use uuid::Uuid;

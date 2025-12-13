@@ -91,22 +91,6 @@ pub struct CreditsQuotaResponse {
     pub total_credits: i32,
 }
 
-/// Error response for duplicate transaction
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DuplicateTransactionError {
-    pub code: String,
-    pub message: String,
-    pub details: DuplicateTransactionDetails,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DuplicateTransactionDetails {
-    pub transaction_id: String,
-    pub previously_granted_at: time::OffsetDateTime,
-}
-
 impl CreditPurchaseRequest {
     /// Extract credit amount from product ID
     pub fn extract_credit_amount(&self) -> Option<i32> {

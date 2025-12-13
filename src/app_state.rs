@@ -17,10 +17,7 @@ pub struct AppState {
     pub quota_service: Arc<QuotaService>,
     pub credits_service: Arc<CreditsService>,
     pub jwt_service: Arc<JWTService>,
-    pub refresh_token_service: Arc<RefreshTokenService>,
-    pub welcome_bonus_service: Arc<WelcomeBonusService>,
     pub auth_service: Arc<AuthService>,
-    pub config: Arc<Config>,
 }
 
 impl AppState {
@@ -64,10 +61,7 @@ impl AppState {
             quota_service,
             credits_service,
             jwt_service,
-            refresh_token_service,
-            welcome_bonus_service,
             auth_service,
-            config: config_arc,
         })
     }
 }

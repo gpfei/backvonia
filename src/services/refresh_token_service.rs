@@ -139,45 +139,6 @@ impl RefreshTokenService {
         Ok(result.rows_affected)
     }
 
-    /// Clean up expired and revoked tokens (for cron job)
-    pub async fn cleanup_expired_tokens(&self) -> Result<u64> {
-        let now = OffsetDateTime::now_utc();
-
-        // Delete tokens that are either:
-        // 1. Expired (expires_at < now)
-        // 2. Revoked more than 7 days ago
-        let result = refresh_tokens::Entity::delete_many()
-            .filter(
-                Condition::any()
-                    .add(refresh_tokens::Column::ExpiresAt.lt(now))
-                    .add(
-                        Condition::all()
-                            .add(refresh_tokens::Column::RevokedAt.is_not_null())
-                            .add(
-                                refresh_tokens::Column::RevokedAt.lt(now - time::Duration::days(7)),
-                            ),
-                    ),
-            )
-            .exec(&self.db)
-            .await?;
-
-        Ok(result.rows_affected)
-    }
-
-    /// Get active token count for a user
-    pub async fn get_active_token_count(&self, user_id: Uuid) -> Result<u64> {
-        let now = OffsetDateTime::now_utc();
-
-        let count = refresh_tokens::Entity::find()
-            .filter(refresh_tokens::Column::UserId.eq(user_id))
-            .filter(refresh_tokens::Column::RevokedAt.is_null())
-            .filter(refresh_tokens::Column::ExpiresAt.gt(now))
-            .count(&self.db)
-            .await?;
-
-        Ok(count)
-    }
-
     /// Hash token using SHA256 (for secure storage)
     fn hash_token(token: &str) -> String {
         let mut hasher = Sha256::new();

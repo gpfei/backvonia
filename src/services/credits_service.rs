@@ -54,7 +54,13 @@ impl CreditsService {
             original_transaction_id: Set(original_transaction_id.map(|s| s.to_string())),
             transaction_id: Set(transaction_id.to_string()),
             product_id: Set(Some(product_id.to_string())),
-            platform: Set(Some(platform.as_str().to_string())),
+            platform: Set(Some(
+                match platform {
+                    IAPPlatform::Apple => "apple",
+                    IAPPlatform::Google => "google",
+                }
+                .to_string(),
+            )),
             amount: Set(amount),
             consumed: Set(0),
             occurred_at: Set(purchase_date),
@@ -101,81 +107,9 @@ impl CreditsService {
         Ok((persisted_purchase.id, total_extra))
     }
 
-    /// Record a new credit purchase within an existing transaction
-    /// Used by services that need to atomically combine bonus tracking with credit grants
-    #[instrument(skip(self, receipt_data, txn))]
-    #[allow(clippy::too_many_arguments)]
-    pub async fn record_purchase_in_txn(
-        &self,
-        user_id: Uuid,
-        original_transaction_id: Option<&str>,
-        transaction_id: &str,
-        product_id: &str,
-        platform: IAPPlatform,
-        amount: i32,
-        purchase_date: time::OffsetDateTime,
-        receipt_data: Option<&str>,
-        txn: &DatabaseTransaction,
-    ) -> Result<(uuid::Uuid, i32)> {
-        // Prepare new purchase record
-        let now = time::OffsetDateTime::now_utc();
-        let purchase_id = Uuid::new_v4();
-
-        let new_purchase = entity::credits_events::ActiveModel {
-            id: Set(purchase_id),
-            user_id: Set(user_id),
-            event_type: Set("purchase".to_string()),
-            original_transaction_id: Set(original_transaction_id.map(|s| s.to_string())),
-            transaction_id: Set(transaction_id.to_string()),
-            product_id: Set(Some(product_id.to_string())),
-            platform: Set(Some(platform.as_str().to_string())),
-            amount: Set(amount),
-            consumed: Set(0),
-            occurred_at: Set(purchase_date),
-            verified_at: Set(now),
-            receipt_data: Set(receipt_data.map(|s| s.to_string())),
-            revoked_at: Set(None),
-            revoked_reason: Set(None),
-            device_id: Set(None),
-            provider: Set(None),
-            provider_user_id: Set(None),
-            metadata: Set(None),
-        };
-
-        // Insert purchase idempotently
-        entity::credits_events::Entity::insert(new_purchase)
-            .on_conflict(
-                OnConflict::column(entity::credits_events::Column::TransactionId)
-                    .do_nothing()
-                    .to_owned(),
-            )
-            .exec(txn)
-            .await?;
-
-        let persisted_purchase = entity::credits_events::Entity::find()
-            .filter(entity::credits_events::Column::TransactionId.eq(transaction_id))
-            .one(txn)
-            .await?
-            .ok_or_else(|| {
-                ApiError::Internal(anyhow!(
-                    "Failed to read purchase after insert for transaction {}",
-                    transaction_id
-                ))
-            })?;
-
-        // Recalculate totals (idempotent: same result if already existed)
-        let total_extra = self.recalculate_extra_credits_txn(user_id, txn).await?;
-
-        info!(
-            "Recorded credit purchase in txn: user={}, transaction={}, amount={}, total_extra={}",
-            user_id, transaction_id, amount, total_extra
-        );
-
-        Ok((persisted_purchase.id, total_extra))
-    }
-
     /// Record a welcome bonus event within an existing transaction
     #[instrument(skip(self, txn))]
+    #[allow(clippy::too_many_arguments)]
     pub async fn record_welcome_bonus_in_txn(
         &self,
         user_id: Uuid,
@@ -266,20 +200,6 @@ impl CreditsService {
         Ok(purchases)
     }
 
-    /// Calculate total extra credits for a user
-    #[instrument(skip(self))]
-    pub async fn calculate_total_extra_credits(&self, user_id: Uuid) -> Result<i32> {
-        let events = entity::credits_events::Entity::find()
-            .filter(entity::credits_events::Column::UserId.eq(user_id))
-            .filter(entity::credits_events::Column::RevokedAt.is_null())
-            .filter(entity::credits_events::Column::EventType.ne("consumption"))
-            .all(&self.db)
-            .await?;
-
-        let total: i32 = events.iter().map(|e| e.remaining()).sum();
-        Ok(total)
-    }
-
     /// Recalculate and update extra_credits_remaining in user_credit_balance
     /// This is the CRITICAL method that makes purchased credits usable by QuotaService
     async fn recalculate_extra_credits_txn(
@@ -323,127 +243,6 @@ impl CreditsService {
             .await?;
 
         Ok(total_remaining)
-    }
-
-    /// Consume credits using correct order: subscription FIRST, then extra credits
-    ///
-    /// Rationale: Subscription credits expire monthly, extra credits never expire.
-    /// Therefore, consume subscription credits first to avoid losing them.
-    #[instrument(skip(self))]
-    pub async fn consume_credits(
-        &self,
-        user_id: Uuid,
-        amount: i32,
-    ) -> Result<ConsumedCreditsBreakdown> {
-        let txn = self.db.begin().await?;
-
-        let mut remaining = amount;
-        let mut consumed_from_subscription = 0;
-        let mut consumed_from_extra = 0;
-
-        let today = time::OffsetDateTime::now_utc().date();
-
-        // 1. FIRST: Consume from subscription credits (they expire monthly)
-        let quota = entity::quota_usage::Entity::find()
-            .filter(entity::quota_usage::Column::UserId.eq(user_id))
-            .filter(entity::quota_usage::Column::UsageDate.eq(today))
-            .lock_exclusive()
-            .one(&txn)
-            .await?;
-
-        if let Some(quota) = quota {
-            if quota.subscription_credits > 0 {
-                let to_consume = remaining.min(quota.subscription_credits);
-
-                let mut quota_active: entity::quota_usage::ActiveModel = quota.into();
-                let current = quota_active.subscription_credits.as_ref().to_owned();
-                quota_active.subscription_credits = Set(current - to_consume);
-                quota_active.updated_at = Set(time::OffsetDateTime::now_utc());
-                quota_active.update(&txn).await?;
-
-                consumed_from_subscription = to_consume;
-                remaining -= to_consume;
-            }
-        }
-
-        // 2. SECOND: If subscription exhausted, consume from extra credits (FIFO by occurred_at)
-        if remaining > 0 {
-            let events = entity::credits_events::Entity::find()
-                .filter(entity::credits_events::Column::UserId.eq(user_id))
-                .filter(entity::credits_events::Column::RevokedAt.is_null())
-                .filter(entity::credits_events::Column::EventType.ne("consumption"))
-                .order_by_asc(entity::credits_events::Column::OccurredAt)
-                .lock_exclusive()
-                .all(&txn)
-                .await?;
-
-            for event in events {
-                if remaining == 0 {
-                    break;
-                }
-
-                let available = event.remaining();
-                if available > 0 {
-                    let to_consume = remaining.min(available);
-
-                    // Update consumed count
-                    let mut event_active: entity::credits_events::ActiveModel = event.into();
-                    let current_consumed = event_active.consumed.as_ref().to_owned();
-                    event_active.consumed = Set(current_consumed + to_consume);
-                    event_active.update(&txn).await?;
-
-                    consumed_from_extra += to_consume;
-                    remaining -= to_consume;
-                }
-            }
-        }
-
-        // 3. Check if we have enough credits
-        if remaining > 0 {
-            txn.rollback().await?;
-            return Err(ApiError::QuotaExceeded(format!(
-                "Insufficient credits: needed {}, have {} subscription + {} extra = {} total",
-                amount,
-                consumed_from_subscription,
-                consumed_from_extra,
-                consumed_from_subscription + consumed_from_extra
-            )));
-        }
-
-        // 4. Recalculate total extra credits
-        self.recalculate_extra_credits_txn(user_id, &txn).await?;
-
-        txn.commit().await?;
-
-        info!(
-            "Consumed {} credits for user {}: {} from subscription, {} from extra",
-            amount, user_id, consumed_from_subscription, consumed_from_extra
-        );
-
-        Ok(ConsumedCreditsBreakdown {
-            total: amount,
-            from_subscription: consumed_from_subscription,
-            from_extra: consumed_from_extra,
-        })
-    }
-
-    /// Check if user has sufficient credits
-    /// CRITICAL FIX: Now reads from user_credit_balance
-    #[instrument(skip(self))]
-    pub async fn check_sufficient_credits(&self, user_id: Uuid, required: i32) -> Result<bool> {
-        // Read from user_credit_balance (accurate balance)
-        let balance = entity::user_credit_balance::Entity::find()
-            .filter(entity::user_credit_balance::Column::UserId.eq(user_id))
-            .one(&self.db)
-            .await?;
-
-        let total = if let Some(balance) = balance {
-            balance.subscription_credits + balance.extra_credits_remaining
-        } else {
-            0
-        };
-
-        Ok(total >= required)
     }
 
     /// Get complete credits quota information
@@ -512,11 +311,4 @@ impl CreditsService {
             total_credits: full.total_credits,
         })
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct ConsumedCreditsBreakdown {
-    pub total: i32,
-    pub from_subscription: i32,
-    pub from_extra: i32,
 }

@@ -55,72 +55,12 @@ pub enum PurchaseTier {
     Pro,
 }
 
-impl PurchaseTier {
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "free" => Some(Self::Free),
-            "pro" => Some(Self::Pro),
-            _ => None,
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Free => "free",
-            Self::Pro => "pro",
-        }
-    }
-}
-
 /// IAP Platform
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum IAPPlatform {
     Apple,
     Google,
-}
-
-impl IAPPlatform {
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "apple" => Some(Self::Apple),
-            "google" => Some(Self::Google),
-            _ => None,
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Apple => "apple",
-            Self::Google => "google",
-        }
-    }
-}
-
-/// Quota information (full details)
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Quota {
-    // Subscription credits (monthly allocation)
-    pub subscription_credits: i32,
-    pub subscription_monthly_allocation: i32,
-    pub subscription_resets_at: Option<String>, // ISO 8601 timestamp
-
-    // Extra purchased credits
-    pub extra_credits_total: i32,
-    pub extra_credits_consumed: i32,
-    pub extra_credits_remaining: i32,
-
-    // Total available credits
-    pub total_credits_remaining: i32,
-}
-
-/// Subset of quota info for AI API responses
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct QuotaSubset {
-    // Total remaining credits (usable for any operation: text or image)
-    pub credits_remaining: i32,
 }
 
 /// AI Operation types with weighted quota costs

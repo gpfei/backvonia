@@ -39,10 +39,6 @@ struct AppleTransaction {
     cancellation_date_ms: Option<String>,
     #[serde(default)]
     is_in_billing_retry_period: Option<String>, // "true" or "false"
-    #[serde(default)]
-    is_in_intro_offer_period: Option<String>,
-    #[serde(default)]
-    is_trial_period: Option<String>,
 }
 
 impl IAPService {
@@ -174,7 +170,6 @@ impl IAPService {
             purchase_tier,
             product_id,
             valid_until,
-            platform: IAPPlatform::Apple,
             is_family_shared,
             subscription_status,
         })

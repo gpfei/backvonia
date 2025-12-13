@@ -1,20 +1,6 @@
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
-/// AI Text Continue Mode
-#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum AITextContinueMode {
-    Prose, // Generate full prose continuation (default)
-    Ideas, // Generate high-level continuation ideas or branch directions
-}
-
-impl Default for AITextContinueMode {
-    fn default() -> Self {
-        Self::Prose
-    }
-}
-
 /// AI Text Continue Request (prose)
 #[derive(Debug, Deserialize, Validate)]
 #[serde(rename_all = "camelCase")]
@@ -174,7 +160,7 @@ pub struct TextCandidate {
 }
 
 /// Image generation style
-#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum ImageStyle {
     Storybook,
@@ -184,13 +170,8 @@ pub enum ImageStyle {
     Watercolor,
     InkDrawing,
     ClassicalIllustration,
+    #[default]
     Illustration,
-}
-
-impl Default for ImageStyle {
-    fn default() -> Self {
-        Self::Illustration
-    }
 }
 
 impl ImageStyle {
@@ -204,19 +185,6 @@ impl ImageStyle {
             Self::InkDrawing => "ink-drawing",
             Self::ClassicalIllustration => "classical-illustration",
             Self::Illustration => "illustration",
-        }
-    }
-
-    pub fn description(&self) -> &'static str {
-        match self {
-            Self::Storybook => "Book illustration style with whimsical, painterly qualities",
-            Self::Anime => "Anime/manga art style with expressive characters",
-            Self::DigitalArt => "Modern digital art with vibrant colors and clean lines",
-            Self::Realistic => "Photorealistic style with detailed textures",
-            Self::Watercolor => "Soft watercolor painting with flowing colors",
-            Self::InkDrawing => "Dramatic ink drawing with strong contrast",
-            Self::ClassicalIllustration => "Classical art illustration with renaissance aesthetics",
-            Self::Illustration => "General illustration style, versatile and balanced",
         }
     }
 }
@@ -266,8 +234,8 @@ pub struct NodeContext {
 impl NodeContext {
     /// Validates that at least one of summary or content is non-empty
     pub fn validate_has_content(&self) -> Result<(), &'static str> {
-        let has_summary = self.summary.as_ref().map_or(false, |s| !s.trim().is_empty());
-        let has_content = self.content.as_ref().map_or(false, |c| !c.trim().is_empty());
+        let has_summary = self.summary.as_ref().is_some_and(|s| !s.trim().is_empty());
+        let has_content = self.content.as_ref().is_some_and(|c| !c.trim().is_empty());
 
         if !has_summary && !has_content {
             return Err("Node must have summary or content");

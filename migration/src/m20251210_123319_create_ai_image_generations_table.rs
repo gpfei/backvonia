@@ -19,24 +19,77 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(AIImageGeneration::UserId).uuid().not_null())
                     // Request context
-                    .col(ColumnDef::new(AIImageGeneration::StoryTitle).string().not_null())
-                    .col(ColumnDef::new(AIImageGeneration::NodeSummary).string().null())
+                    .col(
+                        ColumnDef::new(AIImageGeneration::StoryTitle)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(AIImageGeneration::NodeSummary)
+                            .string()
+                            .null(),
+                    )
                     .col(ColumnDef::new(AIImageGeneration::NodeContent).text().null())
                     .col(ColumnDef::new(AIImageGeneration::Style).string().not_null())
-                    .col(ColumnDef::new(AIImageGeneration::Resolution).string().not_null())
+                    .col(
+                        ColumnDef::new(AIImageGeneration::Resolution)
+                            .string()
+                            .not_null(),
+                    )
                     // Generation result
-                    .col(ColumnDef::new(AIImageGeneration::ImageUrl).string().not_null())
+                    .col(
+                        ColumnDef::new(AIImageGeneration::ImageUrl)
+                            .string()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(AIImageGeneration::TempUrl).string().null())
-                    .col(ColumnDef::new(AIImageGeneration::TempUrlExpiresAt).timestamp_with_time_zone().null())
-                    .col(ColumnDef::new(AIImageGeneration::Width).integer().not_null())
-                    .col(ColumnDef::new(AIImageGeneration::Height).integer().not_null())
-                    .col(ColumnDef::new(AIImageGeneration::FileSizeBytes).integer().null())
+                    .col(
+                        ColumnDef::new(AIImageGeneration::TempUrlExpiresAt)
+                            .timestamp_with_time_zone()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(AIImageGeneration::Width)
+                            .integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(AIImageGeneration::Height)
+                            .integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(AIImageGeneration::FileSizeBytes)
+                            .integer()
+                            .null(),
+                    )
                     // Metadata
-                    .col(ColumnDef::new(AIImageGeneration::CreditsUsed).integer().not_null().default(10))
-                    .col(ColumnDef::new(AIImageGeneration::GenerationTimeMs).integer().null())
-                    .col(ColumnDef::new(AIImageGeneration::AiProvider).string().null())
-                    .col(ColumnDef::new(AIImageGeneration::Status).string().not_null())
-                    .col(ColumnDef::new(AIImageGeneration::ErrorMessage).text().null())
+                    .col(
+                        ColumnDef::new(AIImageGeneration::CreditsUsed)
+                            .integer()
+                            .not_null()
+                            .default(10),
+                    )
+                    .col(
+                        ColumnDef::new(AIImageGeneration::GenerationTimeMs)
+                            .integer()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(AIImageGeneration::AiProvider)
+                            .string()
+                            .null(),
+                    )
+                    .col(
+                        ColumnDef::new(AIImageGeneration::Status)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(AIImageGeneration::ErrorMessage)
+                            .text()
+                            .null(),
+                    )
                     // Timestamps
                     .col(
                         ColumnDef::new(AIImageGeneration::CreatedAt)

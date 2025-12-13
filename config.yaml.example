@@ -20,15 +20,12 @@ ai:
       premium:
         # model: openrouter/openai/gpt-4o-mini
         model: openai/gpt-oss-120b:free
-        max_context_tokens: 16000
       standard:
         # model: openrouter/openai/gpt-4o-mini
         model: openai/gpt-oss-20b:free
-        max_context_tokens: 16000
       light:
         # model: openrouter/google/gemini-pro-1.5-flash
         model: qwen/qwen3-235b-a22b:free
-        max_context_tokens: 16000
     image_models:
       free:
         model: openai/dall-e-3

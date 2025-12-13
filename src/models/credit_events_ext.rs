@@ -8,17 +8,10 @@ use entity::credits_events;
 pub trait CreditEventExt {
     /// Calculate remaining credits (amount - consumed)
     fn remaining(&self) -> i32;
-
-    /// Check if there are remaining credits
-    fn has_remaining(&self) -> bool;
 }
 
 impl CreditEventExt for credits_events::Model {
     fn remaining(&self) -> i32 {
         self.amount - self.consumed
-    }
-
-    fn has_remaining(&self) -> bool {
-        self.remaining() > 0
     }
 }

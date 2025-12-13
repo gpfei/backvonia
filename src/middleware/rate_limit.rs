@@ -158,15 +158,3 @@ pub fn create_rate_limiter(
        + Clone {
     rate_limit_middleware(redis_client, RateLimitConfig::default())
 }
-
-/// Create rate limit middleware with custom configuration
-pub fn create_rate_limiter_with_config(
-    redis_client: Arc<Client>,
-    config: RateLimitConfig,
-) -> impl Fn(
-    Request,
-    Next,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response>> + Send>>
-       + Clone {
-    rate_limit_middleware(redis_client, config)
-}

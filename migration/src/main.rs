@@ -4,4 +4,3 @@ use sea_orm_migration::cli;
 async fn main() {
     cli::run_cli(migration::Migrator).await;
 }
-

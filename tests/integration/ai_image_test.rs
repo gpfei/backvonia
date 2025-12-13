@@ -1,22 +1,15 @@
-use backvonia::{
-    config::QuotaConfig,
-    models::{
-        ai::{
-            AIImageGenerateRequest, ImageParams, ImageStoryContext, ImageStyle, NodeContext,
-        },
-        common::AIOperation,
-    },
-    services::QuotaService,
-};
+use backvonia::{config::QuotaConfig, models::common::AIOperation, services::QuotaService};
 use entity::sea_orm_active_enums::AccountTier;
+use entity::user_credit_balance;
 use migration::{Migrator, MigratorTrait};
-use sea_orm::{Database, DatabaseConnection, EntityTrait, QueryFilter, ColumnTrait};
+use sea_orm::{
+    ActiveValue::Set, ColumnTrait, Database, DatabaseConnection, EntityTrait, QueryFilter,
+};
 use uuid::Uuid;
 
 async fn setup_test_db() -> DatabaseConnection {
-    let database_url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
-        "postgresql://postgres:dev@localhost:5432/talevonia_test".to_string()
-    });
+    let database_url = std::env::var("TEST_DATABASE_URL")
+        .unwrap_or_else(|_| "postgresql://postgres:dev@localhost:5432/talevonia_test".to_string());
 
     let db = Database::connect(&database_url)
         .await
@@ -32,33 +25,48 @@ async fn setup_test_db() -> DatabaseConnection {
 
 fn create_test_quota_config() -> QuotaConfig {
     QuotaConfig {
-        free_text_daily_limit: 3,
-        free_image_daily_limit: 1,
-        pro_text_daily_limit: 1000,
-        pro_image_daily_limit: 50,
+        free_text_daily_limit: 15,
+        pro_text_daily_limit: 5000,
     }
 }
 
-fn create_test_image_request() -> AIImageGenerateRequest {
-    AIImageGenerateRequest {
-        story_context: ImageStoryContext {
-            title: "Test Story".to_string(),
-            language: "en".to_string(),
-            genre: Some("Fantasy".to_string()),
-            tone: Some("Dark".to_string()),
-            setting: Some("A mysterious forest".to_string()),
-        },
-        node: NodeContext {
-            summary: Some("The hero discovers a mysterious artifact".to_string()),
-            content: Some("Alice stepped into the crumbling hall...".to_string()),
-            tags: vec!["discovery".to_string(), "artifact".to_string()],
-        },
-        image_params: ImageParams {
-            style: Some(ImageStyle::Storybook),
-            aspect_ratio: "3:4".to_string(),
-            resolution: "medium".to_string(),
-        },
-    }
+async fn seed_user_balance(
+    db: &DatabaseConnection,
+    user_id: Uuid,
+    tier: &AccountTier,
+    config: &QuotaConfig,
+) {
+    let now = time::OffsetDateTime::now_utc();
+    let allocation = match tier {
+        AccountTier::Free => config.free_text_daily_limit,
+        AccountTier::Pro => config.pro_text_daily_limit,
+    };
+
+    let balance = user_credit_balance::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        user_id: Set(user_id),
+        subscription_credits: Set(allocation),
+        subscription_monthly_allocation: Set(allocation),
+        subscription_resets_at: Set(Some(now + time::Duration::days(30))),
+        extra_credits_remaining: Set(0),
+        last_updated: Set(now),
+        created_at: Set(now),
+    };
+
+    user_credit_balance::Entity::insert(balance)
+        .exec(db)
+        .await
+        .expect("Failed to seed user_credit_balance");
+}
+
+async fn total_credits_remaining(db: &DatabaseConnection, user_id: Uuid) -> i32 {
+    let balance = user_credit_balance::Entity::find()
+        .filter(user_credit_balance::Column::UserId.eq(user_id))
+        .one(db)
+        .await
+        .expect("Failed to query user_credit_balance")
+        .expect("Expected user_credit_balance to exist");
+    balance.subscription_credits + balance.extra_credits_remaining
 }
 
 #[tokio::test]
@@ -71,17 +79,18 @@ async fn test_image_generation_failure_refunds_credits() {
     let user_id = Uuid::new_v4();
     let tier = AccountTier::Free;
 
+    seed_user_balance(&db, user_id, &tier, &quota_config).await;
+
     // Check initial credits
-    let initial_status = quota_service.check_quota(user_id, &tier).await.unwrap();
-    assert_eq!(initial_status.total_credits_remaining, 15); // Free tier: 15 credits
+    assert_eq!(total_credits_remaining(&db, user_id).await, 15); // Free tier: 15 credits
 
     // Simulate the flow that happens in the route handler:
     // 1. Deduct credits
-    let after_deduct = quota_service
+    quota_service
         .check_and_increment_quota_weighted(user_id, &tier, AIOperation::ImageGenerate)
         .await
         .unwrap();
-    assert_eq!(after_deduct.total_credits_remaining, 5); // 15 - 10 = 5
+    assert_eq!(total_credits_remaining(&db, user_id).await, 5); // 15 - 10 = 5
 
     // 2. Simulate generation failure (in real code, this would be DALL-E failure, upload failure, etc.)
     // Just simulate by calling refund directly
@@ -93,14 +102,16 @@ async fn test_image_generation_failure_refunds_credits() {
         .unwrap();
 
     // 4. Verify credits were refunded
-    let after_refund = quota_service.check_quota(user_id, &tier).await.unwrap();
-    assert_eq!(after_refund.total_credits_remaining, 15); // Back to original
+    assert_eq!(total_credits_remaining(&db, user_id).await, 15); // Back to original
 
     // 5. Verify user can still use the service (credits are available)
     let second_attempt = quota_service
         .check_and_increment_quota_weighted(user_id, &tier, AIOperation::ImageGenerate)
         .await;
-    assert!(second_attempt.is_ok(), "User should be able to retry after refund");
+    assert!(
+        second_attempt.is_ok(),
+        "User should be able to retry after refund"
+    );
 
     println!("✅ Image generation failure refund test passed");
 }
@@ -115,13 +126,14 @@ async fn test_multiple_failures_multiple_refunds() {
     let user_id = Uuid::new_v4();
     let tier = AccountTier::Free;
 
+    seed_user_balance(&db, user_id, &tier, &quota_config).await;
+
     // Simulate 3 failed attempts with refunds
     for i in 1..=3 {
         println!("Attempt {}", i);
 
         // Check credits before
-        let before = quota_service.check_quota(user_id, &tier).await.unwrap();
-        assert_eq!(before.total_credits_remaining, 15);
+        assert_eq!(total_credits_remaining(&db, user_id).await, 15);
 
         // Deduct
         quota_service
@@ -130,8 +142,7 @@ async fn test_multiple_failures_multiple_refunds() {
             .unwrap();
 
         // Verify deduction
-        let after_deduct = quota_service.check_quota(user_id, &tier).await.unwrap();
-        assert_eq!(after_deduct.total_credits_remaining, 5);
+        assert_eq!(total_credits_remaining(&db, user_id).await, 5);
 
         // Refund
         quota_service
@@ -140,8 +151,7 @@ async fn test_multiple_failures_multiple_refunds() {
             .unwrap();
 
         // Verify refund
-        let after_refund = quota_service.check_quota(user_id, &tier).await.unwrap();
-        assert_eq!(after_refund.total_credits_remaining, 15);
+        assert_eq!(total_credits_remaining(&db, user_id).await, 15);
     }
 
     println!("✅ Multiple failures with refunds test passed");
@@ -157,6 +167,8 @@ async fn test_partial_failure_preserves_successful_operations() {
     let user_id = Uuid::new_v4();
     let tier = AccountTier::Free;
 
+    seed_user_balance(&db, user_id, &tier, &quota_config).await;
+
     // First operation: success (don't refund)
     quota_service
         .check_and_increment_quota_weighted(user_id, &tier, AIOperation::ContinueProse)
@@ -164,8 +176,7 @@ async fn test_partial_failure_preserves_successful_operations() {
         .unwrap();
 
     // After first success: 15 - 5 = 10 credits
-    let status = quota_service.check_quota(user_id, &tier).await.unwrap();
-    assert_eq!(status.total_credits_remaining, 10);
+    assert_eq!(total_credits_remaining(&db, user_id).await, 10);
 
     // Second operation: failure (deduct then refund)
     quota_service
@@ -174,8 +185,7 @@ async fn test_partial_failure_preserves_successful_operations() {
         .unwrap();
 
     // After second deduct: 10 - 10 = 0
-    let status = quota_service.check_quota(user_id, &tier).await.unwrap();
-    assert_eq!(status.total_credits_remaining, 0);
+    assert_eq!(total_credits_remaining(&db, user_id).await, 0);
 
     // Refund the failed image operation
     quota_service
@@ -184,8 +194,7 @@ async fn test_partial_failure_preserves_successful_operations() {
         .unwrap();
 
     // After refund: should have 10 credits (first operation still consumed)
-    let status = quota_service.check_quota(user_id, &tier).await.unwrap();
-    assert_eq!(status.total_credits_remaining, 10);
+    assert_eq!(total_credits_remaining(&db, user_id).await, 10);
 
     println!("✅ Partial failure preserves successful operations test passed");
 }
@@ -199,6 +208,8 @@ async fn test_free_tier_single_failure_can_retry() {
 
     let user_id = Uuid::new_v4();
     let tier = AccountTier::Free;
+
+    seed_user_balance(&db, user_id, &tier, &quota_config).await;
 
     // Free tier has 15 credits, image costs 10
     // After one failure with refund, user should be able to retry
@@ -224,8 +235,7 @@ async fn test_free_tier_single_failure_can_retry() {
         "Free tier user should be able to retry after refund"
     );
 
-    let status = result.unwrap();
-    assert_eq!(status.total_credits_remaining, 5); // 15 - 10 = 5
+    assert_eq!(total_credits_remaining(&db, user_id).await, 5); // 15 - 10 = 5
 
     println!("✅ Free tier retry after failure test passed");
 }
@@ -240,6 +250,8 @@ async fn test_analytics_accuracy_after_refund() {
     let user_id = Uuid::new_v4();
     let tier = AccountTier::Free;
     let today = time::OffsetDateTime::now_utc().date();
+
+    seed_user_balance(&db, user_id, &tier, &quota_config).await;
 
     // Successful image generation
     quota_service

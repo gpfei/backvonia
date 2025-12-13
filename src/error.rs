@@ -38,9 +38,6 @@ pub enum ApiError {
     #[error("User not found: {0}")]
     UserNotFound(String),
 
-    #[error("Conflict: {0}")]
-    Conflict(String),
-
     #[error("Rate limit exceeded")]
     RateLimitExceeded,
 
@@ -91,7 +88,6 @@ impl IntoResponse for ApiError {
             ApiError::UserNotFound(ref msg) => {
                 (StatusCode::NOT_FOUND, "USER_NOT_FOUND", msg.clone())
             }
-            ApiError::Conflict(ref msg) => (StatusCode::CONFLICT, "CONFLICT", msg.clone()),
             ApiError::RateLimitExceeded => (
                 StatusCode::TOO_MANY_REQUESTS,
                 "RATE_LIMIT_EXCEEDED",

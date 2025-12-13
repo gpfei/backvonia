@@ -8,10 +8,9 @@ use crate::{
     middleware::UserIdentity,
     models::{
         ai::{
-            AIImageGenerateRequest, AIImageGenerateResponse, GeneratedImage,
-            AITextContinueRequest, AITextContinueResponse, AITextEditMode, AITextEditRequest,
-            AITextEditResponse, AITextIdeasRequest, AITextSummarizeRequest,
-            AITextSummarizeResponse,
+            AIImageGenerateRequest, AIImageGenerateResponse, AITextContinueRequest,
+            AITextContinueResponse, AITextEditMode, AITextEditRequest, AITextEditResponse,
+            AITextIdeasRequest, AITextSummarizeRequest, AITextSummarizeResponse, GeneratedImage,
         },
         common::AIOperation,
     },
@@ -35,7 +34,7 @@ pub async fn text_continue(
 
     // Ensure at least one node has content or summary
     let has_content = request.path_nodes.iter().any(|node| {
-        !node.content.is_empty() || node.summary.as_ref().map_or(false, |s| !s.is_empty())
+        !node.content.is_empty() || node.summary.as_ref().is_some_and(|s| !s.is_empty())
     });
     if !has_content {
         return Err(ApiError::BadRequest(
@@ -102,6 +101,11 @@ pub async fn image_generate(
         .validate()
         .map_err(|e| ApiError::BadRequest(format!("Validation error: {}", e)))?;
 
+    request
+        .node
+        .validate_has_content()
+        .map_err(|msg| ApiError::BadRequest(msg.to_string()))?;
+
     let tier = &identity.account_tier;
     let start_time = std::time::Instant::now();
 
@@ -116,7 +120,12 @@ pub async fn image_generate(
         // Generate image (returns image bytes + metadata)
         let (image_bytes, image_metadata) = state
             .ai_service
-            .generate_image(&request.story_context, &request.node, &request.image_params, tier)
+            .generate_image(
+                &request.story_context,
+                &request.node,
+                &request.image_params,
+                tier,
+            )
             .await?;
 
         // Encode to base64
@@ -162,7 +171,7 @@ pub async fn image_generate(
             generation_record
                 .insert(&state.db)
                 .await
-                .map_err(|e| ApiError::Database(e))?;
+                .map_err(ApiError::Database)?;
 
             Ok(Json(AIImageGenerateResponse {
                 image: GeneratedImage {
@@ -318,7 +327,7 @@ pub async fn text_ideas(
 
     // Ensure at least one node has content or summary
     let has_content = request.path_nodes.iter().any(|node| {
-        !node.content.is_empty() || node.summary.as_ref().map_or(false, |s| !s.is_empty())
+        !node.content.is_empty() || node.summary.as_ref().is_some_and(|s| !s.is_empty())
     });
     if !has_content {
         return Err(ApiError::BadRequest(

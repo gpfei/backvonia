@@ -6,9 +6,3 @@ mod credits_test;
 mod middleware_test;
 mod quota_test;
 mod race_condition_test;
-
-// Test setup helpers
-pub async fn setup_test_environment() {
-    // Load test environment variables
-    dotenvy::from_filename(".env.test").ok();
-}

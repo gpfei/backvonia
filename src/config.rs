@@ -69,7 +69,6 @@ pub struct ModelTiers {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ModelTierConfig {
     pub model: String,
-    pub max_context_tokens: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -94,8 +93,6 @@ pub struct TaskRouting {
 pub struct IAPConfig {
     pub apple_shared_secret: String,
     pub apple_environment: String,
-    #[serde(default)]
-    pub google_service_account_key_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -104,7 +101,6 @@ pub struct AuthConfig {
     pub access_token_expiration_minutes: u64,
     pub refresh_token_expiration_days: u64,
     pub apple_client_id: String,   // Apple Sign In client ID (bundle ID)
-    pub apple_team_id: String,     // Apple developer team ID
     pub welcome_bonus_amount: i32, // Welcome bonus credits for new users
 }
 
@@ -139,21 +135,12 @@ impl Config {
                 "ai.openrouter.api_base",
                 env::var("OPENROUTER_API_BASE").ok(),
             )?
-            .set_override_option("ai.openrouter.referer", env::var("OPENROUTER_REFERER").ok())?
-            .set_override_option(
-                "ai.openrouter.app_title",
-                env::var("OPENROUTER_APP_TITLE").ok(),
-            )?
             // IAP
             .set_override_option(
                 "iap.apple_shared_secret",
                 env::var("APPLE_SHARED_SECRET").ok(),
             )?
             .set_override_option("iap.apple_environment", env::var("APPLE_ENVIRONMENT").ok())?
-            .set_override_option(
-                "iap.google_service_account_key_path",
-                env::var("GOOGLE_SERVICE_ACCOUNT_KEY_PATH").ok(),
-            )?
             // Auth
             .set_override_option("auth.jwt_secret", env::var("JWT_SECRET").ok())?
             .set_override_option(
@@ -169,7 +156,6 @@ impl Config {
                     .and_then(|v| v.parse::<u64>().ok()),
             )?
             .set_override_option("auth.apple_client_id", env::var("APPLE_CLIENT_ID").ok())?
-            .set_override_option("auth.apple_team_id", env::var("APPLE_TEAM_ID").ok())?
             .set_override_option(
                 "auth.welcome_bonus_amount",
                 env::var("WELCOME_BONUS_AMOUNT")

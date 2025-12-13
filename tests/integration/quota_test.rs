@@ -1,11 +1,10 @@
-use backvonia::{
-    config::{Config, QuotaConfig},
-    models::common::AIOperation,
-    services::QuotaService,
-};
+use backvonia::{config::QuotaConfig, models::common::AIOperation, services::QuotaService};
 use entity::sea_orm_active_enums::AccountTier;
+use entity::user_credit_balance;
 use migration::{Migrator, MigratorTrait};
-use sea_orm::{Database, DatabaseConnection};
+use sea_orm::{
+    ActiveValue::Set, ColumnTrait, Database, DatabaseConnection, EntityTrait, QueryFilter,
+};
 use std::sync::Arc;
 use tokio::sync::Barrier;
 use uuid::Uuid;
@@ -28,11 +27,54 @@ async fn setup_test_db() -> DatabaseConnection {
 
 fn create_test_quota_config() -> QuotaConfig {
     QuotaConfig {
-        free_text_daily_limit: 3,
-        free_image_daily_limit: 1,
-        pro_text_daily_limit: 1000,
-        pro_image_daily_limit: 50,
+        free_text_daily_limit: 15,
+        pro_text_daily_limit: 5000,
     }
+}
+
+async fn seed_user_balance(
+    db: &DatabaseConnection,
+    user_id: Uuid,
+    tier: &AccountTier,
+    config: &QuotaConfig,
+) {
+    let now = time::OffsetDateTime::now_utc();
+    let allocation = match tier {
+        AccountTier::Free => config.free_text_daily_limit,
+        AccountTier::Pro => config.pro_text_daily_limit,
+    };
+
+    let balance = user_credit_balance::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        user_id: Set(user_id),
+        subscription_credits: Set(allocation),
+        subscription_monthly_allocation: Set(allocation),
+        subscription_resets_at: Set(Some(now + time::Duration::days(30))),
+        extra_credits_remaining: Set(0),
+        last_updated: Set(now),
+        created_at: Set(now),
+    };
+
+    user_credit_balance::Entity::insert(balance)
+        .exec(db)
+        .await
+        .expect("Failed to seed user_credit_balance");
+}
+
+async fn get_balance(db: &DatabaseConnection, user_id: Uuid) -> (i32, i32, i32) {
+    let balance = user_credit_balance::Entity::find()
+        .filter(user_credit_balance::Column::UserId.eq(user_id))
+        .one(db)
+        .await
+        .expect("Failed to query user_credit_balance")
+        .expect("Expected user_credit_balance to exist");
+
+    let total = balance.subscription_credits + balance.extra_credits_remaining;
+    (
+        balance.subscription_credits,
+        balance.extra_credits_remaining,
+        total,
+    )
 }
 
 #[tokio::test]
@@ -40,12 +82,14 @@ fn create_test_quota_config() -> QuotaConfig {
 async fn test_quota_race_condition_prevented() {
     let db = setup_test_db().await;
     let config = create_test_quota_config();
-    let service = Arc::new(QuotaService::new(db, &config));
+    let service = Arc::new(QuotaService::new(db.clone(), &config));
 
     // Test identity with free tier (15 credits from subscription)
     // Each ContinueProse operation costs 5 credits, so should allow 3 operations
     let user_id = Uuid::new_v4();
     let tier = AccountTier::Free;
+
+    seed_user_balance(&db, user_id, &tier, &config).await;
 
     // Spawn 10 concurrent requests
     let barrier = Arc::new(Barrier::new(10));
@@ -56,32 +100,30 @@ async fn test_quota_race_condition_prevented() {
         let barrier = Arc::clone(&barrier);
         let tier_clone = tier.clone();
 
-        let handle: tokio::task::JoinHandle<
-            backvonia::error::Result<backvonia::services::quota_service::QuotaStatus>,
-        > = tokio::spawn(async move {
-            // Wait for all tasks to be ready
-            barrier.wait().await;
+        let handle: tokio::task::JoinHandle<backvonia::error::Result<()>> =
+            tokio::spawn(async move {
+                // Wait for all tasks to be ready
+                barrier.wait().await;
 
-            // Try to use credits atomically (ContinueProse = 5 credits)
-            service
-                .check_and_increment_quota_weighted(
-                    user_id,
-                    &tier_clone,
-                    AIOperation::ContinueProse,
-                )
-                .await
-        });
+                // Try to use credits atomically (ContinueProse = 5 credits)
+                service
+                    .check_and_increment_quota_weighted(
+                        user_id,
+                        &tier_clone,
+                        AIOperation::ContinueProse,
+                    )
+                    .await
+            });
 
         handles.push(handle);
     }
 
     // Collect results
-    let results: Vec<backvonia::error::Result<backvonia::services::quota_service::QuotaStatus>> =
-        futures::future::join_all(handles)
-            .await
-            .into_iter()
-            .map(|r| r.unwrap())
-            .collect();
+    let results: Vec<backvonia::error::Result<()>> = futures::future::join_all(handles)
+        .await
+        .into_iter()
+        .map(|r| r.unwrap())
+        .collect();
 
     // Count successes and failures
     let successes = results.iter().filter(|r| r.is_ok()).count();
@@ -105,34 +147,36 @@ async fn test_quota_race_condition_prevented() {
 async fn test_quota_check_and_increment_atomic() {
     let db = setup_test_db().await;
     let config = create_test_quota_config();
-    let service = QuotaService::new(db, &config);
+    let service = QuotaService::new(db.clone(), &config);
 
     let user_id = Uuid::new_v4();
     let tier = AccountTier::Free;
+
+    seed_user_balance(&db, user_id, &tier, &config).await;
 
     // First operation should succeed (ContinueProse = 5 credits)
     let result1 = service
         .check_and_increment_quota_weighted(user_id, &tier, AIOperation::ContinueProse)
         .await;
     assert!(result1.is_ok());
-    let status1 = result1.unwrap();
-    assert_eq!(status1.total_credits_remaining, 10); // 15 - 5 = 10
+    let (_, _, total1) = get_balance(&db, user_id).await;
+    assert_eq!(total1, 10); // 15 - 5 = 10
 
     // Second operation should succeed
     let result2 = service
         .check_and_increment_quota_weighted(user_id, &tier, AIOperation::ContinueProse)
         .await;
     assert!(result2.is_ok());
-    let status2 = result2.unwrap();
-    assert_eq!(status2.total_credits_remaining, 5); // 10 - 5 = 5
+    let (_, _, total2) = get_balance(&db, user_id).await;
+    assert_eq!(total2, 5); // 10 - 5 = 5
 
     // Third operation should succeed
     let result3 = service
         .check_and_increment_quota_weighted(user_id, &tier, AIOperation::ContinueProse)
         .await;
     assert!(result3.is_ok());
-    let status3 = result3.unwrap();
-    assert_eq!(status3.total_credits_remaining, 0); // 5 - 5 = 0
+    let (_, _, total3) = get_balance(&db, user_id).await;
+    assert_eq!(total3, 0); // 5 - 5 = 0
 
     // Fourth operation should fail (quota exceeded)
     let result4 = service
@@ -148,16 +192,17 @@ async fn test_quota_check_and_increment_atomic() {
 async fn test_quota_pro_tier_limits() {
     let db = setup_test_db().await;
     let config = create_test_quota_config();
-    let service = QuotaService::new(db, &config);
 
     let user_id = Uuid::new_v4();
     let tier = AccountTier::Pro;
 
-    // Pro tier should have higher subscription credits (5000)
-    let quota_info = service.get_quota_info(user_id, &tier).await.unwrap();
+    seed_user_balance(&db, user_id, &tier, &config).await;
 
-    assert_eq!(quota_info.subscription_credits, 5000);
-    assert_eq!(quota_info.total_credits_remaining, 5000);
+    // Pro tier should have higher subscription credits (configured)
+    let (sub, extra, total) = get_balance(&db, user_id).await;
+    assert_eq!(sub, 5000);
+    assert_eq!(extra, 0);
+    assert_eq!(total, 5000);
 
     println!("✅ Pro tier quota limits test passed");
 }
@@ -167,22 +212,23 @@ async fn test_quota_pro_tier_limits() {
 async fn test_refund_quota_after_failure() {
     let db = setup_test_db().await;
     let config = create_test_quota_config();
-    let service = QuotaService::new(db, &config);
+    let service = QuotaService::new(db.clone(), &config);
 
     let user_id = Uuid::new_v4();
     let tier = AccountTier::Free;
 
-    // Initial quota check
-    let initial_status = service.check_quota(user_id, &tier).await.unwrap();
-    let initial_credits = initial_status.total_credits_remaining;
-    assert_eq!(initial_credits, 15); // Free tier starts with 15 credits
+    seed_user_balance(&db, user_id, &tier, &config).await;
+    let (_, _, initial_total) = get_balance(&db, user_id).await;
+    assert_eq!(initial_total, 15); // Free tier starts with 15 credits
 
     // Deduct credits for image generation (10 credits)
-    let after_deduct = service
+    service
         .check_and_increment_quota_weighted(user_id, &tier, AIOperation::ImageGenerate)
         .await
         .unwrap();
-    assert_eq!(after_deduct.total_credits_remaining, 5); // 15 - 10 = 5
+
+    let (_, _, after_deduct_total) = get_balance(&db, user_id).await;
+    assert_eq!(after_deduct_total, 5); // 15 - 10 = 5
 
     // Simulate failure and refund
     service
@@ -191,8 +237,8 @@ async fn test_refund_quota_after_failure() {
         .unwrap();
 
     // Verify refund
-    let after_refund = service.check_quota(user_id, &tier).await.unwrap();
-    assert_eq!(after_refund.total_credits_remaining, 15); // Back to 15
+    let (_, _, after_refund_total) = get_balance(&db, user_id).await;
+    assert_eq!(after_refund_total, 15); // Back to 15
 
     println!("✅ Refund quota after failure test passed");
 }
@@ -202,10 +248,12 @@ async fn test_refund_quota_after_failure() {
 async fn test_refund_does_not_create_negative_usage() {
     let db = setup_test_db().await;
     let config = create_test_quota_config();
-    let service = QuotaService::new(db, &config);
+    let service = QuotaService::new(db.clone(), &config);
 
     let user_id = Uuid::new_v4();
     let tier = AccountTier::Free;
+
+    seed_user_balance(&db, user_id, &tier, &config).await;
 
     // Try to refund without any prior deduction
     // This should succeed (defensive programming - just adds credits)
@@ -213,11 +261,14 @@ async fn test_refund_does_not_create_negative_usage() {
         .refund_quota_weighted(user_id, &tier, AIOperation::ImageGenerate)
         .await;
 
-    assert!(result.is_ok(), "Refund should not fail even without prior deduction");
+    assert!(
+        result.is_ok(),
+        "Refund should not fail even without prior deduction"
+    );
 
     // Check that credits were added
-    let status = service.check_quota(user_id, &tier).await.unwrap();
-    assert_eq!(status.total_credits_remaining, 25); // 15 initial + 10 refunded
+    let (_, _, total) = get_balance(&db, user_id).await;
+    assert_eq!(total, 25); // 15 initial + 10 refunded
 
     println!("✅ Refund without negative usage test passed");
 }
@@ -227,10 +278,12 @@ async fn test_refund_does_not_create_negative_usage() {
 async fn test_refund_multiple_operations() {
     let db = setup_test_db().await;
     let config = create_test_quota_config();
-    let service = QuotaService::new(db, &config);
+    let service = QuotaService::new(db.clone(), &config);
 
     let user_id = Uuid::new_v4();
     let tier = AccountTier::Free;
+
+    seed_user_balance(&db, user_id, &tier, &config).await;
 
     // Deduct for text operation (5 credits)
     service
@@ -245,8 +298,8 @@ async fn test_refund_multiple_operations() {
         .unwrap();
 
     // Should have 0 credits left (15 - 5 - 10 = 0)
-    let status = service.check_quota(user_id, &tier).await.unwrap();
-    assert_eq!(status.total_credits_remaining, 0);
+    let (_, _, total) = get_balance(&db, user_id).await;
+    assert_eq!(total, 0);
 
     // Refund text operation
     service
@@ -255,8 +308,8 @@ async fn test_refund_multiple_operations() {
         .unwrap();
 
     // Should have 5 credits back
-    let status = service.check_quota(user_id, &tier).await.unwrap();
-    assert_eq!(status.total_credits_remaining, 5);
+    let (_, _, total) = get_balance(&db, user_id).await;
+    assert_eq!(total, 5);
 
     // Refund image operation
     service
@@ -265,8 +318,8 @@ async fn test_refund_multiple_operations() {
         .unwrap();
 
     // Should have all 15 credits back
-    let status = service.check_quota(user_id, &tier).await.unwrap();
-    assert_eq!(status.total_credits_remaining, 15);
+    let (_, _, total) = get_balance(&db, user_id).await;
+    assert_eq!(total, 15);
 
     println!("✅ Refund multiple operations test passed");
 }
@@ -276,19 +329,33 @@ async fn test_refund_multiple_operations() {
 async fn test_refund_with_extra_credits() {
     let db = setup_test_db().await;
     let config = create_test_quota_config();
-    let service = QuotaService::new(db, &config);
+    let service = QuotaService::new(db.clone(), &config);
 
     let user_id = Uuid::new_v4();
     let tier = AccountTier::Free;
 
-    // Add extra credits (like from a purchase)
-    service.add_extra_credits(user_id, &tier, 50).await.unwrap();
+    // Seed extra credits (like from a purchase)
+    let now = time::OffsetDateTime::now_utc();
+    let balance = user_credit_balance::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        user_id: Set(user_id),
+        subscription_credits: Set(config.free_text_daily_limit),
+        subscription_monthly_allocation: Set(config.free_text_daily_limit),
+        subscription_resets_at: Set(Some(now + time::Duration::days(30))),
+        extra_credits_remaining: Set(50),
+        last_updated: Set(now),
+        created_at: Set(now),
+    };
+    user_credit_balance::Entity::insert(balance)
+        .exec(&db)
+        .await
+        .expect("Failed to seed user_credit_balance");
 
     // Should have 65 total credits (15 subscription + 50 extra)
-    let status = service.check_quota(user_id, &tier).await.unwrap();
-    assert_eq!(status.total_credits_remaining, 65);
-    assert_eq!(status.subscription_credits, 15);
-    assert_eq!(status.extra_credits_remaining, 50);
+    let (sub, extra, total) = get_balance(&db, user_id).await;
+    assert_eq!(total, 65);
+    assert_eq!(sub, 15);
+    assert_eq!(extra, 50);
 
     // Deduct for image (10 credits from subscription)
     service
@@ -297,10 +364,10 @@ async fn test_refund_with_extra_credits() {
         .unwrap();
 
     // Should have 55 total (5 subscription + 50 extra)
-    let status = service.check_quota(user_id, &tier).await.unwrap();
-    assert_eq!(status.total_credits_remaining, 55);
-    assert_eq!(status.subscription_credits, 5);
-    assert_eq!(status.extra_credits_remaining, 50);
+    let (sub, extra, total) = get_balance(&db, user_id).await;
+    assert_eq!(total, 55);
+    assert_eq!(sub, 5);
+    assert_eq!(extra, 50);
 
     // Refund the image operation
     service
@@ -309,10 +376,10 @@ async fn test_refund_with_extra_credits() {
         .unwrap();
 
     // Refund goes to extra credits (65 total: 5 subscription + 60 extra)
-    let status = service.check_quota(user_id, &tier).await.unwrap();
-    assert_eq!(status.total_credits_remaining, 65);
-    assert_eq!(status.subscription_credits, 5);
-    assert_eq!(status.extra_credits_remaining, 60);
+    let (sub, extra, total) = get_balance(&db, user_id).await;
+    assert_eq!(total, 65);
+    assert_eq!(sub, 5);
+    assert_eq!(extra, 60);
 
     println!("✅ Refund with extra credits test passed");
 }

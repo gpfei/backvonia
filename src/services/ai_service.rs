@@ -92,8 +92,6 @@ struct OpenRouterImageChoice {
 #[derive(Debug, Deserialize)]
 struct OpenRouterImageMessage {
     #[serde(default)]
-    content: String,
-    #[serde(default)]
     images: Vec<String>, // Base64-encoded data URLs
 }
 
@@ -415,7 +413,7 @@ impl AIService {
                         content.push_str(&format!("{}. {}...\n", i + 1, preview));
                     }
                 }
-                content.push_str("\n");
+                content.push('\n');
             }
 
             content.push_str("Recent events:\n");
@@ -457,7 +455,7 @@ impl AIService {
                         content.push_str(&format!("- {}...\n", preview));
                     }
                 }
-                content.push_str("\n");
+                content.push('\n');
             }
 
             content.push_str("Current situation:\n");
@@ -607,7 +605,7 @@ Note: Continue in the same language as the story content. If you cannot detect t
     /// Build prompt for image generation
     fn build_image_prompt(
         &self,
-        context: &ImageStoryContext,
+        _context: &ImageStoryContext,
         node: &NodeContext,
         params: &ImageParams,
     ) -> String {
@@ -856,7 +854,7 @@ Note: Generate ideas in the same language as the story content. If you cannot de
                 prompt.push_str(&format!("Tags: {}\n", ctx.tags.join(", ")));
             }
             if !prompt.is_empty() {
-                prompt.push_str("\n");
+                prompt.push('\n');
             }
         }
 
@@ -943,8 +941,8 @@ Note: Generate ideas in the same language as the story content. If you cannot de
                 user_prompt.push_str(&format!("Genre: {}\n", context.tags.join(", ")));
             }
 
-            if user_prompt.len() > 0 {
-                user_prompt.push_str("\n");
+            if !user_prompt.is_empty() {
+                user_prompt.push('\n');
             }
         }
 
@@ -1133,7 +1131,6 @@ Note: Generate ideas in the same language as the story content. If you cannot de
 #[derive(Debug, Clone)]
 struct SelectedModel {
     model: String,
-    max_context_tokens: u32,
     downgraded: bool,
 }
 
@@ -1207,7 +1204,6 @@ impl AIService {
 
         Ok(SelectedModel {
             model: tier_config.model.clone(),
-            max_context_tokens: tier_config.max_context_tokens,
             downgraded,
         })
     }

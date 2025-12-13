@@ -1,7 +1,7 @@
 use crate::{
     config::QuotaConfig,
     error::{ApiError, Result},
-    models::common::{AIOperation, Quota, QuotaSubset},
+    models::common::AIOperation,
 };
 use entity::sea_orm_active_enums::AccountTier;
 use sea_orm::{
@@ -14,18 +14,6 @@ use uuid::Uuid;
 pub struct QuotaService {
     db: DatabaseConnection,
     config: QuotaConfig,
-}
-
-#[derive(Debug, Clone)]
-pub struct QuotaStatus {
-    // Total credits available (subscription + extra)
-    pub total_credits_remaining: i32,
-
-    // Breakdown for detailed responses
-    pub subscription_credits: i32,
-    pub subscription_monthly_allocation: i32,
-    pub subscription_resets_at: Option<time::OffsetDateTime>,
-    pub extra_credits_remaining: i32,
 }
 
 impl QuotaService {
@@ -44,28 +32,6 @@ impl QuotaService {
         }
     }
 
-    /// Check current quota status for a user
-    /// Returns total available credits (subscription + extra purchases)
-    #[instrument(skip(self))]
-    pub async fn check_quota(&self, user_id: Uuid, tier: &AccountTier) -> Result<QuotaStatus> {
-        // Get or create credit balance
-        let balance = self.get_or_create_credit_balance(user_id, tier).await?;
-
-        // Check if subscription needs reset
-        let balance = self.reset_subscription_if_needed(balance, tier).await?;
-
-        // Calculate total remaining
-        let total_remaining = balance.subscription_credits + balance.extra_credits_remaining;
-
-        Ok(QuotaStatus {
-            total_credits_remaining: total_remaining,
-            subscription_credits: balance.subscription_credits,
-            subscription_monthly_allocation: balance.subscription_monthly_allocation,
-            subscription_resets_at: balance.subscription_resets_at,
-            extra_credits_remaining: balance.extra_credits_remaining,
-        })
-    }
-
     /// Check and increment quota atomically with weighted cost
     /// Deducts from subscription first, then extra credits (FIFO-like behavior)
     #[instrument(skip(self))]
@@ -74,7 +40,7 @@ impl QuotaService {
         user_id: Uuid,
         tier: &AccountTier,
         operation: AIOperation,
-    ) -> Result<QuotaStatus> {
+    ) -> Result<()> {
         let cost = operation.cost() as i32;
         let today = time::OffsetDateTime::now_utc().date();
 
@@ -154,83 +120,6 @@ impl QuotaService {
             total_remaining
         );
 
-        Ok(QuotaStatus {
-            total_credits_remaining: total_remaining,
-            subscription_credits: updated_balance.subscription_credits,
-            subscription_monthly_allocation: updated_balance.subscription_monthly_allocation,
-            subscription_resets_at: updated_balance.subscription_resets_at,
-            extra_credits_remaining: updated_balance.extra_credits_remaining,
-        })
-    }
-
-    /// Get full quota info
-    pub async fn get_quota_info(&self, user_id: Uuid, tier: &AccountTier) -> Result<Quota> {
-        let status = self.check_quota(user_id, tier).await?;
-
-        // Query total purchased credits
-        let total_purchased = entity::credits_events::Entity::find()
-            .filter(entity::credits_events::Column::UserId.eq(user_id))
-            .filter(entity::credits_events::Column::RevokedAt.is_null())
-            .filter(entity::credits_events::Column::EventType.ne("consumption"))
-            .select_only()
-            .column_as(entity::credits_events::Column::Amount.sum(), "total_amount")
-            .into_tuple::<Option<i32>>()
-            .one(&self.db)
-            .await?
-            .flatten()
-            .unwrap_or(0);
-
-        let extra_consumed = total_purchased - status.extra_credits_remaining;
-
-        Ok(Quota {
-            subscription_credits: status.subscription_credits,
-            subscription_monthly_allocation: status.subscription_monthly_allocation,
-            subscription_resets_at: status.subscription_resets_at.map(|dt| dt.to_string()),
-            extra_credits_total: total_purchased,
-            extra_credits_consumed: extra_consumed,
-            extra_credits_remaining: status.extra_credits_remaining,
-            total_credits_remaining: status.total_credits_remaining,
-        })
-    }
-
-    /// Get quota subset for AI API responses (DEPRECATED - quota no longer returned in AI responses)
-    pub async fn get_quota_subset(&self, user_id: Uuid, tier: &AccountTier) -> Result<QuotaSubset> {
-        let status = self.check_quota(user_id, tier).await?;
-
-        Ok(QuotaSubset {
-            credits_remaining: status.total_credits_remaining,
-        })
-    }
-
-    /// Add extra credits from purchase
-    #[instrument(skip(self))]
-    pub async fn add_extra_credits(
-        &self,
-        user_id: Uuid,
-        tier: &AccountTier,
-        amount: i32,
-    ) -> Result<()> {
-        let txn = self.db.begin().await?;
-
-        let balance = self
-            .find_and_lock_credit_balance(user_id, tier, &txn)
-            .await?;
-        let mut balance_active: entity::user_credit_balance::ActiveModel = balance.into();
-
-        let current_extra = *balance_active.extra_credits_remaining.as_ref();
-        balance_active.extra_credits_remaining = Set(current_extra + amount);
-        balance_active.last_updated = Set(time::OffsetDateTime::now_utc());
-        balance_active.update(&txn).await?;
-
-        txn.commit().await?;
-
-        info!(
-            "Added {} extra credits to user: {} (new total extra: {})",
-            amount,
-            user_id,
-            current_extra + amount
-        );
-
         Ok(())
     }
 
@@ -290,71 +179,6 @@ impl QuotaService {
         );
 
         Ok(())
-    }
-
-    /// Helper: Get or create credit balance for a user
-    /// IMPORTANT: When creating, syncs extra credits from credits_events
-    async fn get_or_create_credit_balance(
-        &self,
-        user_id: Uuid,
-        tier: &AccountTier,
-    ) -> Result<entity::user_credit_balance::Model> {
-        // Try to find existing balance
-        if let Some(balance) = entity::user_credit_balance::Entity::find()
-            .filter(entity::user_credit_balance::Column::UserId.eq(user_id))
-            .one(&self.db)
-            .await?
-        {
-            return Ok(balance);
-        }
-
-        // Calculate extra credits from ledger events
-        // This handles the case where user received credits BEFORE first quota check
-        let events = entity::credits_events::Entity::find()
-            .filter(entity::credits_events::Column::UserId.eq(user_id))
-            .filter(entity::credits_events::Column::RevokedAt.is_null())
-            .filter(entity::credits_events::Column::EventType.ne("consumption"))
-            .all(&self.db)
-            .await?;
-
-        let extra_credits: i32 = events.iter().map(|p| p.amount - p.consumed).sum();
-
-        // Create initial balance on first request
-        let now = time::OffsetDateTime::now_utc();
-        let next_month = now + time::Duration::days(30);
-        let monthly_allocation = self.get_monthly_allocation(tier);
-
-        let new_balance = entity::user_credit_balance::ActiveModel {
-            id: Set(Uuid::new_v4()),
-            user_id: Set(user_id),
-            subscription_credits: Set(monthly_allocation),
-            subscription_monthly_allocation: Set(monthly_allocation),
-            subscription_resets_at: Set(Some(next_month)),
-            extra_credits_remaining: Set(extra_credits), // Sync from purchases!
-            last_updated: Set(now),
-            created_at: Set(now),
-        };
-
-        // Insert with ON CONFLICT DO NOTHING (race condition safety)
-        entity::user_credit_balance::Entity::insert(new_balance)
-            .on_conflict(
-                OnConflict::column(entity::user_credit_balance::Column::UserId)
-                    .do_nothing()
-                    .to_owned(),
-            )
-            .exec(&self.db)
-            .await?;
-
-        // Return the existing or newly-inserted row
-        entity::user_credit_balance::Entity::find()
-            .filter(entity::user_credit_balance::Column::UserId.eq(user_id))
-            .one(&self.db)
-            .await?
-            .ok_or_else(|| {
-                ApiError::Internal(anyhow::anyhow!(
-                    "Failed to find credit balance record after upsert"
-                ))
-            })
     }
 
     /// Helper: Find and lock credit balance for update (within transaction)
@@ -424,40 +248,6 @@ impl QuotaService {
             })
     }
 
-    /// Helper: Reset subscription credits if needed (outside transaction)
-    async fn reset_subscription_if_needed(
-        &self,
-        balance: entity::user_credit_balance::Model,
-        tier: &AccountTier,
-    ) -> Result<entity::user_credit_balance::Model> {
-        let now = time::OffsetDateTime::now_utc();
-
-        // Check if reset is needed
-        if let Some(resets_at) = balance.subscription_resets_at {
-            if now >= resets_at {
-                // Reset subscription credits
-                let monthly_allocation = self.get_monthly_allocation(tier);
-                let next_reset = now + time::Duration::days(30);
-
-                let mut balance_active: entity::user_credit_balance::ActiveModel = balance.into();
-                balance_active.subscription_credits = Set(monthly_allocation);
-                balance_active.subscription_resets_at = Set(Some(next_reset));
-                balance_active.last_updated = Set(now);
-
-                let updated = balance_active.update(&self.db).await?;
-
-                info!(
-                    "Reset subscription credits for user: {} to {}",
-                    updated.user_id, monthly_allocation
-                );
-
-                return Ok(updated);
-            }
-        }
-
-        Ok(balance)
-    }
-
     /// Helper: Reset subscription credits if needed (within transaction)
     async fn reset_subscription_if_needed_tx(
         &self,
@@ -491,56 +281,6 @@ impl QuotaService {
         }
 
         Ok(balance)
-    }
-
-    /// Helper: Get or create usage record for a date (daily analytics log).
-    async fn get_or_create_usage(
-        &self,
-        user_id: Uuid,
-        date: time::Date,
-    ) -> Result<entity::quota_usage::Model> {
-        let now = time::OffsetDateTime::now_utc();
-
-        // Try to insert a row; if it already exists, do nothing.
-        let new_usage = entity::quota_usage::ActiveModel {
-            id: Set(Uuid::new_v4()),
-            user_id: Set(user_id),
-            usage_date: Set(date),
-            text_count: Set(0),
-            image_count: Set(0),
-            created_at: Set(now),
-            updated_at: Set(now),
-            extra_credits_total: Set(0), // Not used with new architecture
-            subscription_credits: Set(0), // Not used with new architecture
-            subscription_monthly_allocation: Set(0), // Not used with new architecture
-            last_extra_credits_sync: NotSet,
-            subscription_resets_at: NotSet,
-        };
-
-        // Using ON CONFLICT DO NOTHING avoids unique violations under concurrency.
-        entity::quota_usage::Entity::insert(new_usage)
-            .on_conflict(
-                OnConflict::columns([
-                    entity::quota_usage::Column::UserId,
-                    entity::quota_usage::Column::UsageDate,
-                ])
-                .do_nothing()
-                .to_owned(),
-            )
-            .exec(&self.db)
-            .await?;
-
-        // Return the existing or newly-inserted row.
-        entity::quota_usage::Entity::find()
-            .filter(entity::quota_usage::Column::UserId.eq(user_id))
-            .filter(entity::quota_usage::Column::UsageDate.eq(date))
-            .one(&self.db)
-            .await?
-            .ok_or_else(|| {
-                ApiError::Internal(anyhow::anyhow!(
-                    "Failed to find quota usage record after upsert"
-                ))
-            })
     }
 
     /// Helper: Find and lock usage record for update

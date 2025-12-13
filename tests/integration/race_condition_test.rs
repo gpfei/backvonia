@@ -1,7 +1,7 @@
 /// Test race condition handling in credit purchase recording
 ///
 /// This test verifies that concurrent purchase requests with the same transaction_id
-/// are handled correctly - one succeeds, others get 409 Conflict, no 500 errors.
+/// are handled correctly - all succeed idempotently, no 500 errors.
 use backvonia::models::common::IAPPlatform;
 use backvonia::services::CreditsService;
 use sea_orm::{Database, DatabaseConnection};
@@ -56,7 +56,6 @@ async fn test_concurrent_duplicate_transactions() {
 
     // Collect results
     let mut success_count = 0;
-    let mut conflict_count = 0;
     let mut other_error_count = 0;
 
     while let Some(result) = tasks.join_next().await {
@@ -68,15 +67,8 @@ async fn test_concurrent_duplicate_transactions() {
                 }
                 Err(e) => {
                     let err_str = e.to_string();
-                    if err_str.contains("already processed")
-                        || err_str.to_lowercase().contains("conflict")
-                    {
-                        println!("Task {} got expected Conflict: {}", task_id, err_str);
-                        conflict_count += 1;
-                    } else {
-                        println!("Task {} got unexpected error: {}", task_id, err_str);
-                        other_error_count += 1;
-                    }
+                    println!("Task {} got unexpected error: {}", task_id, err_str);
+                    other_error_count += 1;
                 }
             },
             Err(e) => {
@@ -87,13 +79,10 @@ async fn test_concurrent_duplicate_transactions() {
     }
 
     // Assertions:
-    // 1. Exactly ONE request should succeed
-    assert_eq!(success_count, 1, "Expected exactly 1 successful insert");
+    // 1. All requests should succeed idempotently
+    assert_eq!(success_count, 5, "Expected all requests to succeed");
 
-    // 2. All other requests should get Conflict (not 500 errors)
-    assert_eq!(conflict_count, 4, "Expected 4 Conflict responses");
-
-    // 3. No unexpected errors (like 500 Internal Server Error)
+    // 2. No unexpected errors (like 500 Internal Server Error)
     assert_eq!(other_error_count, 0, "Expected no 500 errors or panics");
 }
 
@@ -124,7 +113,7 @@ async fn test_sequential_duplicate_transactions() {
     let (purchase_id_1, total_1) = first_result.unwrap();
     assert_eq!(total_1, 500);
 
-    // Second request with same transaction_id - should get Conflict
+    // Second request with same transaction_id - should succeed idempotently
     let second_result = service
         .record_purchase(
             user_id,
@@ -138,17 +127,10 @@ async fn test_sequential_duplicate_transactions() {
         )
         .await;
 
-    assert!(second_result.is_err(), "Second request should fail");
-
-    let error = second_result.unwrap_err();
-    let error_msg = error.to_string();
-
-    // Should be a Conflict error, not Internal Server Error
-    assert!(
-        error_msg.contains("already processed") || error_msg.to_lowercase().contains("conflict"),
-        "Expected Conflict error, got: {}",
-        error_msg
-    );
+    assert!(second_result.is_ok(), "Second request should succeed");
+    let (purchase_id_2, total_2) = second_result.unwrap();
+    assert_eq!(purchase_id_2, purchase_id_1);
+    assert_eq!(total_2, 500);
 }
 
 #[test]

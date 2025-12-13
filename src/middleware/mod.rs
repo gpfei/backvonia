@@ -1,5 +1,4 @@
 // Middleware modules
-pub mod auth;
 pub mod jwt_auth;
 pub mod logging;
 pub mod rate_limit;

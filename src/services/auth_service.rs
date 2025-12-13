@@ -413,12 +413,27 @@ impl AuthService {
                 _ => ApiError::InvalidToken(format!("Token validation failed: {}", e)),
             })?;
 
+        let claims = token_data.claims;
+
         debug!(
-            sub = %token_data.claims.sub,
+            sub = %claims.sub,
+            iss = %claims.iss,
+            aud = %claims.aud,
+            exp = claims.exp,
+            iat = claims.iat,
             "Apple ID token verified successfully"
         );
 
-        Ok(token_data.claims)
+        // These are already enforced by jsonwebtoken Validation, but logging/reading them here
+        // avoids dead_code and gives us better diagnostics if anything changes upstream.
+        if claims.iss != APPLE_ISSUER {
+            return Err(ApiError::InvalidToken("Invalid token issuer".to_string()));
+        }
+        if claims.aud != self.config.apple_client_id {
+            return Err(ApiError::InvalidToken("Invalid token audience".to_string()));
+        }
+
+        Ok(claims)
     }
 
     /// Fetch Apple's JWKS with caching
@@ -482,23 +497,5 @@ impl AuthService {
             account_tier: user.account_tier.clone(),
             created_at: user.created_at,
         })
-    }
-
-    /// Update user's account tier (admin operation)
-    pub async fn update_account_tier(
-        &self,
-        user_id: Uuid,
-        new_tier: AccountTier,
-    ) -> Result<UserInfo> {
-        let now = OffsetDateTime::now_utc();
-
-        users::Entity::update_many()
-            .filter(users::Column::Id.eq(user_id))
-            .col_expr(users::Column::AccountTier, Expr::value(new_tier.clone()))
-            .col_expr(users::Column::UpdatedAt, Expr::value(now))
-            .exec(&self.db)
-            .await?;
-
-        self.get_user(user_id).await
     }
 }

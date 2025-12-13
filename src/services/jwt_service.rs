@@ -100,7 +100,6 @@ mod tests {
             access_token_expiration_minutes: 15,
             refresh_token_expiration_days: 7,
             apple_client_id: "com.test.app".to_string(),
-            apple_team_id: "TEST123456".to_string(),
             welcome_bonus_amount: 5,
         })
     }
