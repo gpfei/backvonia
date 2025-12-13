@@ -95,17 +95,7 @@ struct OpenRouterImageMessage {
     images: Vec<String>, // Base64-encoded data URLs
 }
 
-// JSON-structured response for continuations
-#[derive(Debug, Deserialize)]
-struct ContinuationsJsonResponse {
-    continuations: Vec<ContinuationItem>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ContinuationItem {
-    title: String,
-    content: String,
-}
+// Note: Removed JSON response structs - now using delimited text format for better reliability
 
 impl AIService {
     pub fn new(config: &AIConfig) -> Self {
@@ -1208,7 +1198,7 @@ impl AIService {
         })
     }
 
-    /// Generate prose story continuations using JSON-structured output
+    /// Generate prose story continuations using delimited text format
     #[instrument(skip(self, context, nodes, account_tier))]
     pub async fn generate_prose_continuations(
         &self,
@@ -1218,41 +1208,40 @@ impl AIService {
         instructions: Option<&str>,
         account_tier: &AccountTier,
     ) -> Result<Vec<TextCandidate>> {
-        // Build JSON-requesting prompt
-        let system_prompt = r#"You are a creative writing assistant for Talevonia, a branching narrative app.
-Return your response as a JSON object with this exact structure:
-{
-  "continuations": [
-    {
-      "title": "Brief 4-8 word summary",
-      "content": "Full prose continuation (follow word count requirements)"
-    }
-  ]
-}
+        // Build prompt with delimited text format (more reliable than JSON)
+        let system_prompt = format!(
+            r#"You are a creative writing assistant for Talevonia, a branching narrative app.
 
-Each continuation should present a different plot direction, character choice, or narrative possibility."#.to_string();
+Generate exactly {} distinct story continuations, each {}-{} words.
 
-        let mut user_prompt = self.build_text_prompt(context, nodes, params, instructions);
-        user_prompt.push_str("\n\nReturn the response in JSON format as specified.");
+Format each continuation EXACTLY like this:
+=== CANDIDATE N ===
+TITLE: [4-12 word summary]
+CONTENT: [story continuation text]
+
+Replace N with the candidate number (1, 2, 3, etc.).
+Each continuation should explore a different narrative direction."#,
+            params.num_candidates, params.min_words, params.max_words
+        );
+
+        let user_prompt = self.build_text_prompt(context, nodes, params, instructions);
 
         // Choose model
         let input_chars = user_prompt.len() + system_prompt.len();
         let model = self.select_model(TaskKind::Continue, account_tier, input_chars)?;
 
-        // Calculate max_tokens with proper overhead for JSON format
-        // Each continuation needs: title (10-20 tokens) + content (max_words * 1.5 tokens)
-        // Plus JSON structure overhead: ~50 tokens per item + 100 tokens for wrapper
-        // Increased multiplier from 1.5 to 2.0 to prevent truncation issues
-        let tokens_per_continuation = (params.max_words as f32 * 2.0) as u32 + 50; // content + title with buffer
-        let json_overhead = params.num_candidates as u32 * 80 + 150; // increased structure overhead
-        let max_tokens = tokens_per_continuation * params.num_candidates as u32 + json_overhead;
+        // Calculate max_tokens for delimited format (simpler than JSON, less overhead)
+        // Each continuation needs: delimiter (~10 tokens) + title (10-20 tokens) + content (max_words * 1.5 tokens)
+        let tokens_per_continuation = (params.max_words as f32 * 1.5) as u32 + 40; // content + title + delimiter
+        let format_overhead = params.num_candidates as u32 * 15 + 50; // minimal overhead for delimiters
+        let max_tokens = tokens_per_continuation * params.num_candidates as u32 + format_overhead;
 
         info!(
             "Prose continuation request: model={}, max_words={}, num_candidates={}, calculated_max_tokens={}, tokens_per_item={}",
             model.model, params.max_words, params.num_candidates, max_tokens, tokens_per_continuation
         );
 
-        // Prepare request with JSON format
+        // Prepare request with plain text format (no JSON)
         let request = OpenAIRequest {
             model: model.model.clone(),
             messages: vec![
@@ -1267,38 +1256,18 @@ Each continuation should present a different plot direction, character choice, o
             ],
             max_tokens,
             temperature: 0.7,
-            n: 1, // Single response with JSON array
-            response_format: Some(ResponseFormat {
-                format_type: "json_object".to_string(),
-            }),
+            n: 1,
+            response_format: None, // Plain text format
         };
 
         // Call API with retry logic
         let response_text = self.call_openrouter_api(request).await?;
 
-        // Parse JSON response
-        let json_response: ContinuationsJsonResponse = serde_json::from_str(&response_text)
-            .map_err(|e| {
-                ApiError::AIProvider(format!(
-                    "Failed to parse JSON response: {}. Response: {}",
-                    e, response_text
-                ))
-            })?;
-
-        // Convert to TextCandidate
-        let candidates: Vec<TextCandidate> = json_response
-            .continuations
-            .into_iter()
-            .map(|item| TextCandidate {
-                id: Uuid::new_v4().to_string(),
-                content: item.content,
-                title: Some(item.title),
-                safety_flags: vec![],
-            })
-            .collect();
+        // Parse delimited text response
+        let candidates = self.parse_delimited_continuations(&response_text)?;
 
         info!(
-            "Generated {} prose continuations using model {} (JSON format)",
+            "Generated {} prose continuations using model {} (delimited format)",
             candidates.len(),
             model.model
         );
@@ -1306,7 +1275,57 @@ Each continuation should present a different plot direction, character choice, o
         Ok(candidates)
     }
 
-    /// Generate high-level continuation ideas using JSON-structured output
+    /// Parse delimited text format into TextCandidates
+    fn parse_delimited_continuations(&self, text: &str) -> Result<Vec<TextCandidate>> {
+        let mut candidates = Vec::new();
+
+        // Split by candidate delimiter
+        for section in text.split("=== CANDIDATE") {
+            let section = section.trim();
+            if section.is_empty() {
+                continue;
+            }
+
+            // Extract title
+            let title = if let Some(title_start) = section.find("TITLE:") {
+                let title_text = &section[title_start + 6..];
+                if let Some(title_end) = title_text.find("CONTENT:") {
+                    Some(title_text[..title_end].trim().to_string())
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            // Extract content
+            let content = if let Some(content_start) = section.find("CONTENT:") {
+                section[content_start + 8..].trim().to_string()
+            } else {
+                continue; // Skip if no content found
+            };
+
+            if !content.is_empty() {
+                candidates.push(TextCandidate {
+                    id: Uuid::new_v4().to_string(),
+                    content,
+                    title,
+                    safety_flags: vec![],
+                });
+            }
+        }
+
+        if candidates.is_empty() {
+            return Err(ApiError::AIProvider(format!(
+                "Failed to parse any candidates from response. Response: {}",
+                text
+            )));
+        }
+
+        Ok(candidates)
+    }
+
+    /// Generate high-level continuation ideas using delimited text format
     #[instrument(skip(self, context, nodes, account_tier))]
     pub async fn generate_continuation_ideas(
         &self,
@@ -1316,44 +1335,39 @@ Each continuation should present a different plot direction, character choice, o
         instructions: Option<&str>,
         account_tier: &AccountTier,
     ) -> Result<Vec<TextCandidate>> {
-        // Build JSON-requesting prompt with dynamic word counts
+        // Build prompt with delimited format (more reliable than JSON)
         let system_prompt = format!(
             r#"You are a creative writing assistant for Talevonia, a branching narrative app.
-Return your response as a JSON object with this exact structure:
-{{
-  "continuations": [
-    {{
-      "title": "4-12 word summary of this branch direction",
-      "content": "{}-{} word description of what happens in this branch"
-    }}
-  ]
-}}
 
+Generate exactly {} high-level story continuation ideas, each {}-{} words.
+
+Format each idea EXACTLY like this:
+=== CANDIDATE N ===
+TITLE: [4-12 word summary]
+CONTENT: [brief description of what happens in this branch]
+
+Replace N with the candidate number (1, 2, 3, etc.).
 Each idea should suggest a distinct narrative direction: character decision, plot twist, or setting change."#,
-            params.min_words, params.max_words
+            params.num_candidates, params.min_words, params.max_words
         );
 
-        let mut user_prompt = self.build_ideas_prompt(context, nodes, params, instructions);
-        user_prompt.push_str("\n\nReturn the response in JSON format as specified.");
+        let user_prompt = self.build_ideas_prompt(context, nodes, params, instructions);
 
         // Choose model
         let input_chars = user_prompt.len() + system_prompt.len();
         let model = self.select_model(TaskKind::Ideas, account_tier, input_chars)?;
 
-        // Calculate max_tokens with proper overhead for JSON format
-        // Each continuation needs: title (15-25 tokens) + content (max_words * 1.5 tokens)
-        // Plus JSON structure overhead: ~50 tokens per item + 100 tokens for wrapper
-        // Increased multiplier from 1.5 to 2.0 to prevent truncation issues
-        let tokens_per_continuation = (params.max_words as f32 * 2.0) as u32 + 50; // content + title with buffer
-        let json_overhead = params.num_candidates as u32 * 80 + 150; // increased structure overhead
-        let max_tokens = tokens_per_continuation * params.num_candidates as u32 + json_overhead;
+        // Calculate max_tokens for delimited format (simpler than JSON, less overhead)
+        let tokens_per_continuation = (params.max_words as f32 * 1.5) as u32 + 40; // content + title + delimiter
+        let format_overhead = params.num_candidates as u32 * 15 + 50; // minimal overhead for delimiters
+        let max_tokens = tokens_per_continuation * params.num_candidates as u32 + format_overhead;
 
         info!(
             "Ideas request: model={}, max_words={}, num_candidates={}, calculated_max_tokens={}, tokens_per_item={}",
             model.model, params.max_words, params.num_candidates, max_tokens, tokens_per_continuation
         );
 
-        // Prepare request with JSON format - calculate max_tokens based on params
+        // Prepare request with plain text format (no JSON)
         let request = OpenAIRequest {
             model: model.model.clone(),
             messages: vec![
@@ -1368,38 +1382,18 @@ Each idea should suggest a distinct narrative direction: character decision, plo
             ],
             max_tokens,
             temperature: 0.8, // Higher creativity for ideas
-            n: 1,             // Single response with JSON array
-            response_format: Some(ResponseFormat {
-                format_type: "json_object".to_string(),
-            }),
+            n: 1,
+            response_format: None, // Plain text format
         };
 
         // Call API with retry logic
         let response_text = self.call_openrouter_api(request).await?;
 
-        // Parse JSON response
-        let json_response: ContinuationsJsonResponse = serde_json::from_str(&response_text)
-            .map_err(|e| {
-                ApiError::AIProvider(format!(
-                    "Failed to parse JSON response: {}. Response: {}",
-                    e, response_text
-                ))
-            })?;
-
-        // Convert to TextCandidate
-        let candidates: Vec<TextCandidate> = json_response
-            .continuations
-            .into_iter()
-            .map(|item| TextCandidate {
-                id: Uuid::new_v4().to_string(),
-                content: item.content,
-                title: Some(item.title),
-                safety_flags: vec![],
-            })
-            .collect();
+        // Parse delimited text response
+        let candidates = self.parse_delimited_continuations(&response_text)?;
 
         info!(
-            "Generated {} continuation ideas using model {} (JSON format)",
+            "Generated {} continuation ideas using model {} (delimited format)",
             candidates.len(),
             model.model
         );

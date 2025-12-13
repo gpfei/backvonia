@@ -231,18 +231,6 @@ pub struct NodeContext {
     pub tags: Vec<String>,
 }
 
-impl NodeContext {
-    /// Validates that at least one of summary or content is non-empty
-    pub fn validate_has_content(&self) -> Result<(), &'static str> {
-        let has_summary = self.summary.as_ref().is_some_and(|s| !s.trim().is_empty());
-        let has_content = self.content.as_ref().is_some_and(|c| !c.trim().is_empty());
-
-        if !has_summary && !has_content {
-            return Err("Node must have summary or content");
-        }
-        Ok(())
-    }
-}
 
 #[derive(Debug, Deserialize, Validate)]
 #[serde(rename_all = "camelCase")]
