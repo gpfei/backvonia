@@ -101,10 +101,10 @@ pub async fn image_generate(
         .validate()
         .map_err(|e| ApiError::BadRequest(format!("Validation error: {}", e)))?;
 
-    request
-        .node
-        .validate_has_content()
-        .map_err(|msg| ApiError::BadRequest(msg.to_string()))?;
+    // request
+    //     .node
+    //     .validate_has_content()
+    //     .map_err(|msg| ApiError::BadRequest(msg.to_string()))?;
 
     let tier = &identity.account_tier;
     let start_time = std::time::Instant::now();
