@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   backvonia:
-    image: ${BACKVONIA_IMAGE:-backvonia:latest}
+    image: ${BACKVONIA_IMAGE:-ghcr.io/gpfei/backvonia:latest}
     container_name: talevonia-backvonia
     env_file:
       - .env
@@ -13,7 +13,7 @@ services:
       HOST: 0.0.0.0
       PORT: 8080
     volumes:
-      - ./config.yaml:/app/config.yaml:ro
+      - ./config.yaml:/app/config.yaml:ro,z
     depends_on:
       postgres:
         condition: service_healthy
@@ -25,7 +25,7 @@ services:
     restart: unless-stopped
 
   migrate:
-    image: ${BACKVONIA_IMAGE:-backvonia:latest}
+    image: ${BACKVONIA_IMAGE:-ghcr.io/gpfei/backvonia:latest}
     container_name: talevonia-migrate
     env_file:
       - .env
@@ -42,14 +42,14 @@ services:
     restart: "no"
 
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     container_name: talevonia-postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: dev
       POSTGRES_DB: talevonia
-    ports:
-      - "5432:5432"
+    # ports:
+    #   - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -59,10 +59,10 @@ services:
       retries: 5
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     container_name: talevonia-redis
-    ports:
-      - "6379:6379"
+    # ports:
+    #   - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:

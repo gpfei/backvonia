@@ -32,12 +32,8 @@ ai:
     image_models:
       free:
         model: openai/dall-e-3
-        size: 1024x1024
-        quality: standard
       pro:
         model: black-forest-labs/flux-1.1-pro
-        size: 1024x1024
-        quality: hd
     ai_routing:
       fix_grammar:
         free_default_tier: light
@@ -66,19 +62,16 @@ ai:
   # openai_api_key: ${OPENAI_API_KEY} # only needed for images
 
 iap:
-  apple_shared_secret: ${APPLE_SHARED_SECRET}
+  apple_shared_secret: your-apple-shared-secret
   apple_environment: sandbox
 
 auth:
-  jwt_secret: ${JWT_SECRET}
+  jwt_secret: your-jwt-secret-min-32-chars
   access_token_expiration_minutes: 15
   refresh_token_expiration_days: 7
-  apple_client_id: ${APPLE_CLIENT_ID}
-  apple_team_id: ${APPLE_TEAM_ID}
+  apple_client_id: com.talevonia.app
+  apple_team_id: YOUR_TEAM_ID
   welcome_bonus_amount: 5
-
-application:
-  base_url: ${BASE_URL:-http://localhost:8080}
 
 quota:
   free_text_daily_limit: 15

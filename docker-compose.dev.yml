@@ -6,7 +6,11 @@ services:
       context: .
       dockerfile: Dockerfile
     image: backvonia:latest
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./.env:/app/.env:ro
 
   migrate:
     image: backvonia:latest
-
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro

@@ -9,7 +9,6 @@ pub struct Config {
     pub ai: AIConfig,
     pub iap: IAPConfig,
     pub auth: AuthConfig,
-    pub application: ApplicationConfig,
     pub quota: QuotaConfig,
 }
 
@@ -31,10 +30,6 @@ pub struct RedisConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AIConfig {
-    #[serde(default)]
-    pub openai_api_key: Option<String>,
-    #[serde(default)]
-    pub anthropic_api_key: Option<String>,
     pub openrouter: OpenRouterConfig,
 }
 
@@ -62,8 +57,6 @@ pub struct ImageModels {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ImageModelConfig {
     pub model: String,
-    pub size: String,
-    pub quality: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -116,15 +109,9 @@ pub struct AuthConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct ApplicationConfig {
-    pub base_url: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 pub struct QuotaConfig {
     // Limits are expressed in weighted quota units (see AIOperation::cost)
     pub free_text_daily_limit: i32,
-    pub free_image_daily_limit: i32,
     pub pro_text_daily_limit: i32,
     pub pro_image_daily_limit: i32,
 }
@@ -151,8 +138,6 @@ impl Config {
             // Redis
             .set_override_option("redis.url", env::var("REDIS_URL").ok())?
             // AI
-            .set_override_option("ai.openai_api_key", env::var("OPENAI_API_KEY").ok())?
-            .set_override_option("ai.anthropic_api_key", env::var("ANTHROPIC_API_KEY").ok())?
             .set_override_option("ai.openrouter.api_key", env::var("OPENROUTER_API_KEY").ok())?
             .set_override_option(
                 "ai.openrouter.api_base",
@@ -195,8 +180,6 @@ impl Config {
                     .ok()
                     .and_then(|v| v.parse::<i32>().ok()),
             )?
-            // Application
-            .set_override_option("application.base_url", env::var("BASE_URL").ok())?
             // Quota
             .set_override_option(
                 "quota.free_text_daily_limit",
@@ -205,47 +188,10 @@ impl Config {
                     .and_then(|v| v.parse::<i32>().ok()),
             )?
             .set_override_option(
-                "quota.free_image_daily_limit",
-                env::var("FREE_IMAGE_DAILY_LIMIT")
-                    .ok()
-                    .and_then(|v| v.parse::<i32>().ok()),
-            )?
-            .set_override_option(
                 "quota.pro_text_daily_limit",
                 env::var("PRO_TEXT_DAILY_LIMIT")
                     .ok()
                     .and_then(|v| v.parse::<i32>().ok()),
-            )?
-            .set_override_option(
-                "quota.pro_image_daily_limit",
-                env::var("PRO_IMAGE_DAILY_LIMIT")
-                    .ok()
-                    .and_then(|v| v.parse::<i32>().ok()),
-            )?
-            // Storage
-            .set_override_option(
-                "storage.endpoint_url",
-                env::var("STORAGE_ENDPOINT_URL").ok(),
-            )?
-            .set_override_option(
-                "storage.access_key_id",
-                env::var("STORAGE_ACCESS_KEY_ID").ok(),
-            )?
-            .set_override_option(
-                "storage.secret_access_key",
-                env::var("STORAGE_SECRET_ACCESS_KEY").ok(),
-            )?
-            .set_override_option("storage.bucket_name", env::var("STORAGE_BUCKET_NAME").ok())?
-            .set_override_option("storage.region", env::var("STORAGE_REGION").ok())?
-            .set_override_option(
-                "storage.public_base_url",
-                env::var("STORAGE_PUBLIC_BASE_URL").ok(),
-            )?
-            .set_override_option(
-                "storage.signed_url_expiration_seconds",
-                env::var("STORAGE_SIGNED_URL_EXPIRATION_SECONDS")
-                    .ok()
-                    .and_then(|v| v.parse::<u64>().ok()),
             )?
             .build()?;
 
