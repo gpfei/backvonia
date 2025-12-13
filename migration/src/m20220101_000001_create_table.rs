@@ -418,87 +418,11 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Create iap_receipt_cache table (with user_id FK)
-        manager
-            .create_table(
-                Table::create()
-                    .table(IapReceiptCache::Table)
-                    .if_not_exists()
-                    .col(pk_uuid(IapReceiptCache::Id))
-                    .col(uuid_null(IapReceiptCache::UserId))
-                    .col(
-                        string(IapReceiptCache::OriginalTransactionId)
-                            .unique_key()
-                            .not_null(),
-                    )
-                    .col(string(IapReceiptCache::Platform).not_null())
-                    .col(
-                        ColumnDef::new(IapReceiptCache::PurchaseTier)
-                            .custom(AccountTier::Type)
-                            .not_null(),
-                    )
-                    .col(string_null(IapReceiptCache::ProductId))
-                    .col(string_null(IapReceiptCache::ReceiptHash))
-                    .col(timestamp_with_time_zone_null(IapReceiptCache::ValidUntil))
-                    .col(timestamp_with_time_zone(IapReceiptCache::LastVerifiedAt).not_null())
-                    .col(
-                        timestamp_with_time_zone(IapReceiptCache::CreatedAt)
-                            .default(Expr::current_timestamp())
-                            .not_null(),
-                    )
-                    .foreign_key(
-                        ForeignKey::create()
-                            .name("fk_iap_receipt_cache_user_id")
-                            .from(IapReceiptCache::Table, IapReceiptCache::UserId)
-                            .to(Users::Table, Users::Id)
-                            .on_delete(ForeignKeyAction::SetNull),
-                    )
-                    .to_owned(),
-            )
-            .await?;
-
-        // Create index on iap_receipt_cache user_id
-        manager
-            .create_index(
-                Index::create()
-                    .name("idx_iap_receipt_cache_user_id")
-                    .table(IapReceiptCache::Table)
-                    .col(IapReceiptCache::UserId)
-                    .to_owned(),
-            )
-            .await?;
-
-        // Create index on iap_receipt_cache original_transaction_id
-        manager
-            .create_index(
-                Index::create()
-                    .name("idx_iap_receipt_cache_original_txn")
-                    .table(IapReceiptCache::Table)
-                    .col(IapReceiptCache::OriginalTransactionId)
-                    .to_owned(),
-            )
-            .await?;
-
-        // Create index on iap_receipt_cache receipt_hash
-        manager
-            .create_index(
-                Index::create()
-                    .name("idx_iap_receipt_cache_hash")
-                    .table(IapReceiptCache::Table)
-                    .col(IapReceiptCache::ReceiptHash)
-                    .to_owned(),
-            )
-            .await?;
-
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         // Drop tables in reverse order (due to foreign keys)
-        manager
-            .drop_table(Table::drop().table(IapReceiptCache::Table).to_owned())
-            .await?;
-
         manager
             .drop_table(Table::drop().table(QuotaUsage::Table).to_owned())
             .await?;
@@ -627,19 +551,4 @@ enum QuotaUsage {
     ImageCount,
     CreatedAt,
     UpdatedAt,
-}
-
-#[derive(DeriveIden)]
-enum IapReceiptCache {
-    Table,
-    Id,
-    UserId,
-    OriginalTransactionId,
-    Platform,
-    PurchaseTier,
-    ProductId,
-    ReceiptHash,
-    ValidUntil,
-    LastVerifiedAt,
-    CreatedAt,
 }

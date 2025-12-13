@@ -27,8 +27,6 @@ pub enum Relation {
     AiImageGeneration,
     #[sea_orm(has_many = "super::credits_events::Entity")]
     CreditsEvents,
-    #[sea_orm(has_many = "super::iap_receipt_cache::Entity")]
-    IapReceiptCache,
     #[sea_orm(has_many = "super::quota_usage::Entity")]
     QuotaUsage,
     #[sea_orm(has_many = "super::refresh_tokens::Entity")]
@@ -48,12 +46,6 @@ impl Related<super::ai_image_generation::Entity> for Entity {
 impl Related<super::credits_events::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::CreditsEvents.def()
-    }
-}
-
-impl Related<super::iap_receipt_cache::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::IapReceiptCache.def()
     }
 }
 

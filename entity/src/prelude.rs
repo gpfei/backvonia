@@ -2,7 +2,6 @@
 
 pub use super::ai_image_generation::Entity as AiImageGeneration;
 pub use super::credits_events::Entity as CreditsEvents;
-pub use super::iap_receipt_cache::Entity as IapReceiptCache;
 pub use super::quota_usage::Entity as QuotaUsage;
 pub use super::refresh_tokens::Entity as RefreshTokens;
 pub use super::user_auth_methods::Entity as UserAuthMethods;
