@@ -67,7 +67,7 @@ impl IntoResponse for ApiError {
             ApiError::AIProvider(ref msg) => {
                 tracing::error!("AI provider error: {}", msg);
                 (
-                    StatusCode::BAD_GATEWAY,
+                    StatusCode::FAILED_DEPENDENCY,
                     "AI_PROVIDER_ERROR",
                     "AI service temporarily unavailable".to_string(),
                 )
